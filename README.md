@@ -1,4 +1,4 @@
-# [Advantage async actor-critic Algorithms (A3C)](Asynchronous Methods for Deep Reinforcement Learning) in PyTorch
+# [Advantage async actor-critic Algorithms (A3C)](https://arxiv.org/abs/1602.01783) in PyTorch
 
 
   @inproceedings{mnih2016asynchronous,
