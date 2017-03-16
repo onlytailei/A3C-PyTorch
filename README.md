@@ -9,3 +9,28 @@
 }
 
 ```
+
+This repository contains an implementation of Adavantage async Actor-Critic (A3C) in PyTorch based on the original paper by the authors and the [TensoFlow implementation](https://github.com/yao62995/A3C) by [yaojian_ict](https://github.com/yao62995).
+
+A3C is the state-of-art Deep Reinforcement Learning method.
+
+
+## Dependencies
+* Python 2.7
+* PyTorch
+* gym (openai)
+* opencv (for env state processing)
+
+
+## Training
+
+```
+python train_atari.py
+```
+
+LSTM and continuous versions are still on going.
+
+## References
+
+* [Asynchronous methods for deep reinforcement learning on arXiv](https://arxiv.org/abs/1602.01783)
+* [yaojian_ict's implementation in TensorFlow](https://github.com/yao62995/A3C).
