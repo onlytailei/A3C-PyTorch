@@ -82,7 +82,7 @@ class A3CModel(object):
             torch.from_numpy(diff).float()))
         v_loss = self.v_criterion(v, batch_target_q) * batch_size 
         entropy = -torch.sum(torch.dot(pl_prob, torch.log(pl_prob + self.args.eps)))
-        loss_all = v_loss + self.args.entropy_beta*entropy + pl_loss
+        loss_all = 0.5* v_loss + self.args.entropy_beta*entropy + pl_loss
         loss_all.backward()
         print loss_all.data.numpy()
         #v_loss.backward()
