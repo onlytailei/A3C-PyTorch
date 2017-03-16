@@ -11,7 +11,6 @@ import argparse
 import signal
 import threading
 import torch.optim as optim
-import random
 import sys
 import os
 from environment import AtariEnv
@@ -23,9 +22,6 @@ class A3CAtari(object):
         self.args = args_
         self.env = AtariEnv(gym.make(self.args.game),args_.frame_seq,args_.frame_skip)
         # TODO lstm layer
-        #if self.args.use_lstm:
-            #self.shared_net = A3CLSTMNet(self.env.state_shape, self.env.action_dim)
-        #else:
         self.shared_net = A3CNet(self.env.state_shape, self.env.action_dim)
         self.optim = optim.RMSprop(self.shared_net.parameters(),self.args.lr) 
         # training threads
@@ -46,6 +42,11 @@ class A3CAtari(object):
         # TODO
         pass
 
+    def save_model(self):
+        torch.save(self.shared_net.state_dict(), './net.pth')
+    
+    def load_model(self):
+        self.shared_net.load_state_dict(torch.load('./net.pth'))
 
 def signal_handler():
     sys.exit(0)
@@ -73,7 +74,7 @@ parser.add_argument("--t_test", type = int,
         default = 1e4, 
         help = "test max time step")
 parser.add_argument("--jobs", type = int, 
-        default = 1, 
+        default = 8, 
         help = "parallel running thread number")
 parser.add_argument("--frame_skip", type = int,
         default = 1, 
@@ -105,7 +106,6 @@ parser.add_argument("--train_step", type = int,
 
 if __name__=="__main__":
     args_ = parser.parse_args()
-
     model = A3CAtari(args_)
     model.train()
 

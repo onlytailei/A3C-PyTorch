@@ -52,12 +52,15 @@ class A3CNet(nn.Module):
         return pl,v
 
 class A3CModel(object):
+    """
+    add PathBackProp compared with A3CNet
+    """
     def __init__(self, state_shape,action_dim, args_):
-        
         self.net = A3CNet(state_shape,action_dim)
         self.action_dim = action_dim 
         self.v_criterion = nn.MSELoss() 
         self.args = args_ 
+    
     def PathBackProp(self,rollout_path_):
         # backprop of the network both policy and value
         state = np.array(rollout_path_['state'])
@@ -75,29 +78,25 @@ class A3CModel(object):
         pl_prob = torch.squeeze(torch.bmm(pl,batch_action))
         pl_log = torch.log(pl_prob) 
         diff = (target_q-v.data.numpy().reshape(-1))
-        pl_loss = torch.dot(pl_log,autograd.Variable(
+        pl_loss = - torch.dot(pl_log,autograd.Variable(
             torch.from_numpy(diff).float()))
         v_loss = self.v_criterion(v, batch_target_q) * batch_size 
-        #entropy = - torch.sum(pl_prob * torch.log(pl_prob + args.eps))
-        entropy = - torch.sum(torch.dot(pl_prob, torch.log(pl_prob + self.args.eps)))
+        entropy = -torch.sum(torch.dot(pl_prob, torch.log(pl_prob + self.args.eps)))
         loss_all = v_loss + self.args.entropy_beta*entropy + pl_loss
         loss_all.backward()
+        print loss_all.data.numpy()
         #v_loss.backward()
         #v_prime = torch.sum((target_q_torch-v)*(target_q_torch-v),0)
         #assert v_loss.data.numpy() == v_prime.data.numpy()
 
 class A3CSingleThread(threading.Thread):
+    
     def __init__(self, thread_id, master):
-        
         self.thread_id = thread_id
         threading.Thread.__init__(self, name = "thread_%d" % thread_id) 
         self.master = master
         self.args = master.args
         self.env = AtariEnv(gym.make(self.args.game), self.args.frame_seq,self.args.frame_skip)
-        # TODO lstm layer 
-        #if self.args.use_lstm:
-            #self.local_net = A3CLSTMNet(self.env.state_shape, self.env.action_dim, scope="local_net_%d" % thread_id)
-        #else:
         self.local_model = A3CModel(self.env.state_shape, self.env.action_dim, master.args)
         # sync the weights at the beginning
         self.sync_network() 
@@ -110,12 +109,10 @@ class A3CSingleThread(threading.Thread):
         self.local_model.net.load_state_dict(self.master.shared_net.state_dict()) 
     
     def apply_gadients(self):
-        # keep the value
-        # copy the grad of the whole model
-        local_param = [_ for _ in self.local_model.net.parameters()]
-        master_param = self.master.shared_net.parameters()
-        for share_i,local_i in zip(master_param, self.local_model.net.parameters()):
+        for share_i,local_i in zip(self.master.shared_net.parameters(),
+                self.local_model.net.parameters()):
             share_i.grad.data = local_i.grad.data.clone()
+            #share_i._grad = local_i.grad
             assert (share_i.data.numpy().shape == local_i.data.numpy().shape)
 
     def weighted_choose_action(self, pi_probs):
