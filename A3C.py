@@ -19,7 +19,9 @@ import torch.autograd as autograd
 import torch.optim as optim
 from environment import AtariEnv
 
+
 class A3CNet(nn.Module):
+
     def __init__(self, state_shape, action_dim):
         super(A3CNet, self).__init__()
         self.state_shape = state_shape 
@@ -50,6 +52,7 @@ class A3CNet(nn.Module):
         v = F.relu(self.linear_value_1(x))
         v = F.relu(self.linear_value_2(v))
         return pl,v
+
 
 class A3CModel(object):
     """
@@ -88,6 +91,7 @@ class A3CModel(object):
         #v_loss.backward()
         #v_prime = torch.sum((target_q_torch-v)*(target_q_torch-v),0)
         #assert v_loss.data.numpy() == v_prime.data.numpy()
+
 
 class A3CSingleThread(threading.Thread):
     

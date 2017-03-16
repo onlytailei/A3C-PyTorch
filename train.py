@@ -18,6 +18,7 @@ from A3C import *
 
 
 class A3CAtari(object):
+    
     def __init__(self, args_):
         self.args = args_
         self.env = AtariEnv(gym.make(self.args.game),args_.frame_seq,args_.frame_skip)

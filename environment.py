@@ -8,6 +8,7 @@ Info:
 import numpy as np
 import cv2
 
+
 class AtariEnv(object):
     """
     a wrapper of the origin gym env class
