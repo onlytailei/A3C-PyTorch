@@ -172,7 +172,9 @@ class A3CSingleThread(threading.Thread):
         self.optim = optim.RMSprop(self.local_model.net.parameters())
         dtype = torch.cuda.FloatTensor if torch.cuda.is_available() else torch.FloatTensor
         self.local_model.net.type(dtype)
-
+        self.loss_history = []
+        self.win = self.master.vis.image(np.ones((1,1)))
+    
     def sync_network(self): 
         self.local_model.net.load_state_dict(self.master.shared_net.state_dict()) 
     
@@ -271,4 +273,11 @@ class A3CSingleThread(threading.Thread):
                 loss = self.local_model.PathBackProp(rollout_path)
 
             self.logger_.info("thread %d, step %d, loss %f", self.thread_id, loop, loss)
+            self.loss_visual(loss, loop)
             self.apply_gadients()
+
+    def loss_visual(self,loss_, loop_):
+        self.loss_history.append(loss_) 
+        if loop_>2:
+            Y_ = np.array(self.loss_history).reshape(-1,1)
+            self.win = self.master.vis.line(Y = Y_, X = np.arange(len(self.loss_history)), win=self.win)

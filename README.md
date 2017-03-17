@@ -20,20 +20,31 @@ A3C is the state-of-art Deep Reinforcement Learning method.
 * PyTorch
 * gym (openai)
 * opencv (for env state processing)
-
+* visdom (for visualization)
 
 ## Training
+
+### Start visdom server
+
+```
+python -m visdom.server
+```
 
 ### Normal version
 
 ```
-python train_atari.py
+python train.py
 ```
+
 ### LSTM version
 
 ```
-python train_atari.py --use_lstm True
+python train.py --use_lstm True
 ```
+
+### Check the loss line of all threads in http://localhost:8097
+![loss_png](./assets/loss.png)
+
 
 Continuous versions are still on going.
 

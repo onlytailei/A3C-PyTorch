@@ -17,6 +17,7 @@ import logging
 import time
 from environment import AtariEnv
 from A3C import *
+import visdom
 
 class A3CAtari(object):
     
@@ -30,6 +31,7 @@ class A3CAtari(object):
         self.optim = optim.RMSprop(self.shared_net.parameters(),self.args.lr) 
         # training threads
         self.jobs = []
+        self.vis = visdom.Visdom()
         for thread_id in xrange(self.args.jobs):
             job = A3CSingleThread(thread_id, self, logger_)
             self.jobs.append(job)
@@ -51,7 +53,8 @@ class A3CAtari(object):
         self.optim.step()
         self.main_update_step+=1
         self.logger.info("main update step %d", self.main_update_step)
-
+        
+        #assert(self.main_update_step<10)
     def save_model(self):
         torch.save(self.shared_net.state_dict(), './net.pth')
     
