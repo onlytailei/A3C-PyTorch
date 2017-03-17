@@ -39,7 +39,6 @@ class A3CNet(nn.Module):
         self.linear_value_2 = nn.Linear(256,1)
 
     def forward(self,x):
-        x = autograd.Variable(x)
         x = x.view(-1, self.state_shape[0], 
                 self.state_shape[1],self.state_shape[2]) 
         x = F.relu(self.conv1(x))
@@ -73,7 +72,7 @@ class A3CModel(object):
         
         batch_size = state.shape[0]
         
-        batch_state =  torch.from_numpy(state).float()
+        batch_state =  autograd.Variable(torch.from_numpy(state).float())
         batch_action = autograd.Variable(torch.from_numpy(action).float().view(-1,self.action_dim,1))
         batch_target_q = autograd.Variable(torch.from_numpy(target_q).float())
        
@@ -82,10 +81,9 @@ class A3CModel(object):
         
         pl_prob = torch.squeeze(torch.bmm(pl,batch_action))
         pl_log = torch.log(pl_prob) 
-        diff = (target_q-v.data.numpy().reshape(-1))
+        diff = torch.from_numpy(target_q-v.data.numpy().reshape(-1)).float()
         
-        pl_loss = - torch.dot(pl_log, 
-                autograd.Variable(torch.from_numpy(diff).float()))
+        pl_loss = - torch.dot(pl_log, autograd.Variable(diff))
         v_loss = self.v_criterion(v, batch_target_q) * batch_size 
         entropy = -torch.dot(pl_prob, torch.log(pl_prob + self.args.eps))
         
@@ -144,7 +142,7 @@ class A3CSingleThread(threading.Thread):
         t_start = train_step
         rollout_path = {"state": [], "action": [], "rewards": [], "done": []}
         while not terminal and (train_step - t_start <= self.args.t_max):
-            state_tensor = torch.from_numpy(self.env.state).float() 
+            state_tensor = autograd.Variable(torch.from_numpy(self.env.state).float())
             pl, v = self.local_model.net(state_tensor)
             if random.random() < 0.8:
                 action = self.weighted_choose_action(pl.data.numpy()[0])
