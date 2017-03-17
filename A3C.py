@@ -58,21 +58,23 @@ class A3CModel(object):
     """
     add PathBackProp compared with A3CNet
     """
-    def __init__(self, state_shape,action_dim, args_):
+    def __init__(self, state_shape,action_dim, args_, logger_):
         self.net = A3CNet(state_shape,action_dim)
         self.action_dim = action_dim 
         self.v_criterion = nn.MSELoss() 
         self.args = args_ 
+        self.logger_ = logger_ 
     
     def PathBackProp(self,rollout_path_):
         # backprop of the network both policy and value
         state = np.array(rollout_path_['state'])
         target_q = np.array(rollout_path_['returns'])
         action = np.array(rollout_path_['action'])
+        
         batch_size = state.shape[0]
+        
         batch_state =  torch.from_numpy(state).float()
-        batch_action = autograd.Variable(
-                torch.from_numpy(action).float().view(-1,self.action_dim,1))
+        batch_action = autograd.Variable(torch.from_numpy(action).float().view(-1,self.action_dim,1))
         batch_target_q = autograd.Variable(torch.from_numpy(target_q).float())
        
         pl,v = self.net(batch_state)
@@ -81,27 +83,31 @@ class A3CModel(object):
         pl_prob = torch.squeeze(torch.bmm(pl,batch_action))
         pl_log = torch.log(pl_prob) 
         diff = (target_q-v.data.numpy().reshape(-1))
-        pl_loss = - torch.dot(pl_log,autograd.Variable(
-            torch.from_numpy(diff).float()))
+        
+        pl_loss = - torch.dot(pl_log, 
+                autograd.Variable(torch.from_numpy(diff).float()))
         v_loss = self.v_criterion(v, batch_target_q) * batch_size 
-        entropy = -torch.sum(torch.dot(pl_prob, torch.log(pl_prob + self.args.eps)))
+        entropy = -torch.dot(pl_prob, torch.log(pl_prob + self.args.eps))
+        
         loss_all = 0.5* v_loss + self.args.entropy_beta*entropy + pl_loss
         loss_all.backward()
-        print loss_all.data.numpy()
-        #v_loss.backward()
+        return  loss_all.data.numpy()
+        
+        # another way for val loss
         #v_prime = torch.sum((target_q_torch-v)*(target_q_torch-v),0)
         #assert v_loss.data.numpy() == v_prime.data.numpy()
 
 
 class A3CSingleThread(threading.Thread):
     
-    def __init__(self, thread_id, master):
+    def __init__(self, thread_id, master, logger_):
         self.thread_id = thread_id
+        self.logger_ = logger_
         threading.Thread.__init__(self, name = "thread_%d" % thread_id) 
         self.master = master
         self.args = master.args
         self.env = AtariEnv(gym.make(self.args.game), self.args.frame_seq,self.args.frame_skip)
-        self.local_model = A3CModel(self.env.state_shape, self.env.action_dim, master.args)
+        self.local_model = A3CModel(self.env.state_shape, self.env.action_dim, master.args, logger_)
         # sync the weights at the beginning
         self.sync_network() 
         # optimizer is used to zero the old grad
@@ -116,8 +122,13 @@ class A3CSingleThread(threading.Thread):
         for share_i,local_i in zip(self.master.shared_net.parameters(),
                 self.local_model.net.parameters()):
             share_i.grad.data = local_i.grad.data.clone()
-            #share_i._grad = local_i.grad
-            assert (share_i.data.numpy().shape == local_i.data.numpy().shape)
+            
+            # another way to update
+            # share_i._grad = local_i.grad
+            
+            #assert np.array_equal(share_i.grad.data.numpy(), local_i.grad.data.numpy())
+
+        self.master.optim_shared_net()
 
     def weighted_choose_action(self, pi_probs):
         r = random.uniform(0, sum(pi_probs))
@@ -175,5 +186,6 @@ class A3CSingleThread(threading.Thread):
             # calculate rewards 
             rollout_path["returns"] = self.discount(rollout_path["rewards"])
             
-            self.local_model.PathBackProp(rollout_path)
-            self.apply_gadients()             
+            loss = self.local_model.PathBackProp(rollout_path)
+            self.logger_.info("thread %d, step %d, loss %f", self.thread_id, loop, loss)
+            self.apply_gadients()

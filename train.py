@@ -13,13 +13,14 @@ import threading
 import torch.optim as optim
 import sys
 import os
+import logging
+import time
 from environment import AtariEnv
 from A3C import *
 
-
 class A3CAtari(object):
     
-    def __init__(self, args_):
+    def __init__(self, args_,logger_):
         self.args = args_
         self.env = AtariEnv(gym.make(self.args.game),args_.frame_seq,args_.frame_skip)
         # TODO lstm layer
@@ -28,9 +29,10 @@ class A3CAtari(object):
         # training threads
         self.jobs = []
         for thread_id in xrange(self.args.jobs):
-            job = A3CSingleThread(thread_id, self)
+            job = A3CSingleThread(thread_id, self, logger_)
             self.jobs.append(job)
-    
+        self.logger = logger_
+        self.main_update_step = 0
     def train(self):
         self.args.train_step = 0  
         signal.signal(signal.SIGINT, signal_handler)
@@ -42,6 +44,11 @@ class A3CAtari(object):
     def test_sync(self):
         # TODO
         pass
+    
+    def optim_shared_net(self):
+        self.optim.step()
+        self.main_update_step+=1
+        self.logger.info("main update step %d", self.main_update_step)
 
     def save_model(self):
         torch.save(self.shared_net.state_dict(), './net.pth')
@@ -49,8 +56,24 @@ class A3CAtari(object):
     def load_model(self):
         self.shared_net.load_state_dict(torch.load('./net.pth'))
 
+
 def signal_handler():
     sys.exit(0)
+
+
+def loggerConfig():
+    ts = str(time.strftime('%Y-%m-%d-%H-%M-%S'))
+    logger = logging.getLogger()
+    formatter = logging.Formatter(
+            '%(asctime)s %(levelname)-2s %(message)s')
+    #streamhandler_ = logging.StreamHandler()
+    #streamhandler_.setFormatter(formatter)
+    #logger.addHandler(streamhandler_)
+    fileHandler_ = logging.FileHandler("log/a3c_training_log_"+ts)
+    fileHandler_.setFormatter(formatter)
+    logger.addHandler(fileHandler_)
+    logger.setLevel(logging.DEBUG)
+    return logger
 
 parser = argparse.ArgumentParser()
 parser.add_argument("--game", type = str, 
@@ -75,7 +98,7 @@ parser.add_argument("--t_test", type = int,
         default = 1e4, 
         help = "test max time step")
 parser.add_argument("--jobs", type = int, 
-        default = 8, 
+        default = 16, 
         help = "parallel running thread number")
 parser.add_argument("--frame_skip", type = int,
         default = 1, 
@@ -87,8 +110,8 @@ parser.add_argument("--opt", type = str,
         default = "rms", 
         help = "choice in [rms, adam, sgd]")
 parser.add_argument("--lr", type = float,
-        default = 7e-4, 
-        help = "param of smooth")
+        default = 1e-4, 
+        help = "learning rate")
 parser.add_argument("--grad_clip", type = float,
         default = 40.0, 
         help = "gradient clipping cut-off")
@@ -105,8 +128,10 @@ parser.add_argument("--train_step", type = int,
         default = 0, 
         help = "train step. unchanged")
 
+
 if __name__=="__main__":
     args_ = parser.parse_args()
-    model = A3CAtari(args_)
+    logger = loggerConfig() 
+    model = A3CAtari(args_, logger)
     model.train()
 
