@@ -35,7 +35,7 @@ python train_atari.py
 python train_atari.py --use_lstm True
 ```
 
-LSTM and continuous versions are still on going.
+Continuous versions are still on going.
 
 ## References
 
