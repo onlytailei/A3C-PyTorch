@@ -24,8 +24,15 @@ A3C is the state-of-art Deep Reinforcement Learning method.
 
 ## Training
 
+### Normal version
+
 ```
 python train_atari.py
+```
+### LSTM version
+
+```
+python train_atari.py --use_lstm True
 ```
 
 LSTM and continuous versions are still on going.

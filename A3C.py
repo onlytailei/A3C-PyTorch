@@ -265,6 +265,10 @@ class A3CSingleThread(threading.Thread):
             # calculate rewards 
             rollout_path["returns"] = self.discount(rollout_path["rewards"])
             
-            loss = self.local_model.PathBackProp(rollout_path, lstm_hidden=(self.lstm_h_init,self.lstm_c_init))
+            if self.args.use_lstm: 
+                loss = self.local_model.PathBackProp(rollout_path, lstm_hidden=(self.lstm_h_init,self.lstm_c_init))
+            else:
+                loss = self.local_model.PathBackProp(rollout_path)
+
             self.logger_.info("thread %d, step %d, loss %f", self.thread_id, loop, loss)
             self.apply_gadients()
