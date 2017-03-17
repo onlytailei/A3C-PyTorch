@@ -42,7 +42,7 @@ python train.py
 python train.py --use_lstm True
 ```
 
-### Check the loss line of all threads in http://localhost:8097
+### Check the loss curves of all threads in http://localhost:8097
 ![loss_png](./assets/loss.png)
 
 
