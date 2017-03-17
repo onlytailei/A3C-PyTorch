@@ -23,8 +23,10 @@ class A3CAtari(object):
     def __init__(self, args_,logger_):
         self.args = args_
         self.env = AtariEnv(gym.make(self.args.game),args_.frame_seq,args_.frame_skip)
-        # TODO lstm layer
-        self.shared_net = A3CNet(self.env.state_shape, self.env.action_dim)
+        if args_.use_lstm:
+            self.shared_net = A3CLSTMNet(self.env.state_shape, self.env.action_dim)
+        else:
+            self.shared_net = A3CNet(self.env.state_shape, self.env.action_dim)
         self.optim = optim.RMSprop(self.shared_net.parameters(),self.args.lr) 
         # training threads
         self.jobs = []
@@ -86,7 +88,7 @@ parser.add_argument("--gpu", type = int,
         default = 0,
         help = "gpu id")
 parser.add_argument("--use_lstm", type = bool,
-        default = False, 
+        default = True, 
         help = "use LSTM layer")
 parser.add_argument("--t_max", type = int, 
         default = 6,
