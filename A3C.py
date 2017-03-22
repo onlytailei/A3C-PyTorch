@@ -173,7 +173,7 @@ class A3CSingleThread(threading.Thread):
         dtype = torch.cuda.FloatTensor if torch.cuda.is_available() else torch.FloatTensor
         self.local_model.net.type(dtype)
         self.loss_history = []
-        self.win = self.master.vis.image(np.ones((1,1)))
+        self.win = None
     
     def sync_network(self): 
         self.local_model.net.load_state_dict(self.master.shared_net.state_dict()) 
