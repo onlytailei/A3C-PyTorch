@@ -32,6 +32,7 @@ class A3CAtari(object):
         # training threads
         self.jobs = []
         self.vis = visdom.Visdom()
+        self.lock = threading.Lock()
         for thread_id in xrange(self.args.jobs):
             job = A3CSingleThread(thread_id, self, logger_)
             self.jobs.append(job)
@@ -55,11 +56,11 @@ class A3CAtari(object):
         self.logger.info("main update step %d", self.main_update_step)
         
         #assert(self.main_update_step<10)
-    def save_model(self):
-        torch.save(self.shared_net.state_dict(), './net.pth')
+    def save_model(self,name):
+        torch.save(self.shared_net.state_dict(), './models/'+ name + '_weight')
     
-    def load_model(self):
-        self.shared_net.load_state_dict(torch.load('./net.pth'))
+    def load_model(self, name):
+        self.shared_net.load_state_dict(torch.load('./models/'+ name + '_weight'))
 
 
 def signal_handler():

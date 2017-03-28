@@ -274,8 +274,10 @@ class A3CSingleThread(threading.Thread):
 
             self.logger_.info("thread %d, step %d, loss %f", self.thread_id, loop, loss)
             self.loss_visual(loss, loop)
-            self.apply_gadients()
-
+            with self.master.lock:
+                self.apply_gadients()
+                self.args.train_step+=1
+            print self.args.train_step 
     def loss_visual(self,loss_, loop_):
         self.loss_history.append(loss_) 
         if loop_>2:
