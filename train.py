@@ -67,6 +67,7 @@ class A3CAtari(object):
                         state_tensor,hidden)
             else:
                 pl, v = self.shared_net(state_tensor)
+            print pl.data.numpy()[0]
             action = self.weighted_choose_action(pl.data.numpy()[0])
             _, reward, terminal = self.env.forward_action(action)
             reward_ += reward
@@ -151,7 +152,7 @@ parser.add_argument("--opt", type = str,
         default = "rms", 
         help = "choice in [rms, adam, sgd]")
 parser.add_argument("--lr", type = float,
-        default = 1e-3, 
+        default = 1e-4, 
         help = "learning rate")
 parser.add_argument("--grad_clip", type = float,
         default = 40.0, 
@@ -160,7 +161,7 @@ parser.add_argument("--eps", type = float,
         default = 1e-8, 
         help = "param of smooth")
 parser.add_argument("--entropy_beta", type = float,
-        default = 1e-4, 
+        default = 1e-5, 
         help = "param of policy entropy weight")
 parser.add_argument("--gamma", type = float, 
         default = 0.95, 
