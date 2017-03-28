@@ -164,7 +164,7 @@ class A3CSingleThread(threading.Thread):
         threading.Thread.__init__(self, name = "thread_%d" % thread_id) 
         self.master = master
         self.args = master.args
-        self.env = AtariEnv(gym.make(self.args.game), self.args.frame_seq,self.args.frame_skip)
+        self.env = AtariEnv(gym.make(self.args.game), self.args.frame_seq,self.args.frame_skip,self.master.lock)
         self.local_model = A3CModel(self.env.state_shape, self.env.action_dim, master.args, logger_)
         # sync the weights at the beginning
         self.sync_network() 

@@ -23,7 +23,8 @@ class A3CAtari(object):
     
     def __init__(self, args_,logger_):
         self.args = args_
-        self.env = AtariEnv(gym.make(self.args.game),args_.frame_seq,args_.frame_skip)
+        self.lock = threading.Lock()
+        self.env = AtariEnv(gym.make(self.args.game),args_.frame_seq,args_.frame_skip,self.lock)
         if args_.use_lstm:
             self.shared_net = A3CLSTMNet(self.env.state_shape, self.env.action_dim)
         else:
@@ -32,10 +33,10 @@ class A3CAtari(object):
         # training threads
         self.jobs = []
         self.vis = visdom.Visdom()
-        self.lock = threading.Lock()
-        for thread_id in xrange(self.args.jobs):
-            job = A3CSingleThread(thread_id, self, logger_)
-            self.jobs.append(job)
+        if self.args.t_flag:
+            for thread_id in xrange(self.args.jobs):
+                job = A3CSingleThread(thread_id, self, logger_)
+                self.jobs.append(job)
         self.logger = logger_
         self.main_update_step = 0
     def train(self):
@@ -47,20 +48,42 @@ class A3CAtari(object):
             job.join()
     
     def test_sync(self):
-        # TODO
         pass
     
+    def test(self, steps):
+        self.load_model(steps)
+        terminal = False
+        reward_ = 0
+        if self.args.use_lstm:
+            hidden = (autograd.Variable(self.lstm_h_init), 
+                    autograd.Variable(self.lstm_c_init))
+        self.env.reset_env()
+        while not terminal:
+            state_tensor = autograd.Variable(torch.from_numpy(self.env.state).float())
+            if self.args.use_lstm:
+                pl, v, hidden = self.shared_net(state_tensor,hidden)
+            else:
+                pl, v = self.shared_net(state_tensor)
+            
+            action = np.argmax(pl.data.numpy()[0])
+            print "action: ", action        
+            _, reward, terminal = self.env.forward_action(action)
+            reward_ += reward
+            print "reward: ", reward
+        print reward_
+        return reward_
+
     def optim_shared_net(self):
         self.optim.step()
         self.logger.info("main update step %d", self.main_update_step)
-        if self.main_update_step%100 == 0:
+        if self.main_update_step%5000 == 0:
             self.save_model(self.main_update_step)
             self.logger.info("saved weight in %d", self.main_update_step) 
     def save_model(self,name):
-        torch.save(self.shared_net.state_dict(), './models/' + str(name) + '_weight')
+        torch.save(self.shared_net.state_dict(), self.args.train_dir + str(name) + '_weight')
     
     def load_model(self, name):
-        self.shared_net.load_state_dict(torch.load('./models/'+ str(name) + '_weight'))
+        self.shared_net.load_state_dict(torch.load(self.args.train_dir + str(name) + '_weight'))
 
 
 def signal_handler():
@@ -86,13 +109,13 @@ parser.add_argument("--game", type = str,
         default = 'Breakout-v0',
         help = "gym environment name")
 parser.add_argument("--train_dir", type = str, 
-        default = './models/experiment0',
+        default = './models/',
         help = "save environment")
 parser.add_argument("--gpu", type = int, 
         default = 0,
         help = "gpu id")
-parser.add_argument("--use_lstm", type = bool,
-        default = False, 
+parser.add_argument("--use_lstm", type = int,
+        default = 0, 
         help = "use LSTM layer")
 parser.add_argument("--t_max", type = int, 
         default = 6,
@@ -103,11 +126,14 @@ parser.add_argument("--t_train", type = int,
 parser.add_argument("--t_test", type = int,
         default = 1e4, 
         help = "test max time step")
+parser.add_argument("--t_flag", type = int,
+        default = 1, 
+        help = "training flag")
 parser.add_argument("--jobs", type = int, 
-        default = 16, 
+        default = 8, 
         help = "parallel running thread number")
 parser.add_argument("--frame_skip", type = int,
-        default = 1, 
+        default = 3, 
         help = "number of frame skip")
 parser.add_argument("--frame_seq", type = int,
         default = 4, 
@@ -116,7 +142,7 @@ parser.add_argument("--opt", type = str,
         default = "rms", 
         help = "choice in [rms, adam, sgd]")
 parser.add_argument("--lr", type = float,
-        default = 1e-4, 
+        default = 1e-3, 
         help = "learning rate")
 parser.add_argument("--grad_clip", type = float,
         default = 40.0, 
@@ -139,5 +165,10 @@ if __name__=="__main__":
     args_ = parser.parse_args()
     logger = loggerConfig() 
     model = A3CAtari(args_, logger)
-    model.train()
+    if args_.t_flag:
+        print "======training=====" 
+        model.train()
+    else:
+        print "=====testing====="
+        model.test(30000)
 
