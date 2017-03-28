@@ -24,22 +24,16 @@ A3C is the state-of-art Deep Reinforcement Learning method.
 
 ## Training
 
-### Start visdom server
-
-```
-python -m visdom.server
-```
-
 ### Normal version
 
 ```
-python train.py
+./train.sh
 ```
 
 ### LSTM version
 
 ```
-python train.py --use_lstm True
+./train_lstm.sh
 ```
 
 ### Check the loss curves of all threads in http://localhost:8097
