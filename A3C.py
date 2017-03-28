@@ -205,7 +205,8 @@ class A3CSingleThread(threading.Thread):
             hidden = (autograd.Variable(self.lstm_h_init), 
                     autograd.Variable(self.lstm_c_init))
         while not terminal and (train_step - t_start <= self.args.t_max):
-            state_tensor = autograd.Variable(torch.from_numpy(self.env.state).float())
+            state_tensor = autograd.Variable(
+                    torch.from_numpy(self.env.state).float())
             if self.args.use_lstm:
                 pl, v, hidden = self.local_model.net(state_tensor,hidden)
             else:

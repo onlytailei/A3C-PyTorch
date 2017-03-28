@@ -24,7 +24,7 @@ class A3CAtari(object):
     def __init__(self, args_,logger_):
         self.args = args_
         self.lock = threading.Lock()
-        self.env = AtariEnv(gym.make(self.args.game),args_.frame_seq,args_.frame_skip,self.lock)
+        self.env = AtariEnv(gym.make(self.args.game),args_.frame_seq,args_.frame_skip,self.lock,render = True)
         if args_.use_lstm:
             self.shared_net = A3CLSTMNet(self.env.state_shape, self.env.action_dim)
         else:
@@ -39,6 +39,8 @@ class A3CAtari(object):
                 self.jobs.append(job)
         self.logger = logger_
         self.main_update_step = 0
+        if self.args.load_weight !=0 :
+            self.load_model(self.args.load_weight)
     def train(self):
         self.args.train_step = 0  
         signal.signal(signal.SIGINT, signal_handler)
@@ -50,8 +52,7 @@ class A3CAtari(object):
     def test_sync(self):
         pass
     
-    def test(self, steps):
-        self.load_model(steps)
+    def test(self):
         terminal = False
         reward_ = 0
         if self.args.use_lstm:
@@ -59,19 +60,27 @@ class A3CAtari(object):
                     autograd.Variable(self.lstm_c_init))
         self.env.reset_env()
         while not terminal:
-            state_tensor = autograd.Variable(torch.from_numpy(self.env.state).float())
+            state_tensor = autograd.Variable(
+                    torch.from_numpy(self.env.state).float())
             if self.args.use_lstm:
-                pl, v, hidden = self.shared_net(state_tensor,hidden)
+                pl, v, hidden = self.shared_net(
+                        state_tensor,hidden)
             else:
                 pl, v = self.shared_net(state_tensor)
-            
-            action = np.argmax(pl.data.numpy()[0])
-            print "action: ", action        
+            action = self.weighted_choose_action(pl.data.numpy()[0])
             _, reward, terminal = self.env.forward_action(action)
             reward_ += reward
-            print "reward: ", reward
         print reward_
         return reward_
+    
+    def weighted_choose_action(self, pi_probs):
+        r = random.uniform(0, sum(pi_probs))
+        upto = 0
+        for idx, prob in enumerate(pi_probs):
+            if upto + prob >= r:
+                return idx
+            upto += prob
+        return len(pi_probs) - 1
 
     def optim_shared_net(self):
         self.optim.step()
@@ -130,10 +139,10 @@ parser.add_argument("--t_flag", type = int,
         default = 1, 
         help = "training flag")
 parser.add_argument("--jobs", type = int, 
-        default = 8, 
+        default = 16, 
         help = "parallel running thread number")
 parser.add_argument("--frame_skip", type = int,
-        default = 3, 
+        default = 1, 
         help = "number of frame skip")
 parser.add_argument("--frame_seq", type = int,
         default = 4, 
@@ -160,6 +169,10 @@ parser.add_argument("--train_step", type = int,
         default = 0, 
         help = "train step. unchanged")
 
+parser.add_argument("--load_weight", type = int, 
+        default = 0, 
+        help = "train step. unchanged")
+
 
 if __name__=="__main__":
     args_ = parser.parse_args()
@@ -170,5 +183,5 @@ if __name__=="__main__":
         model.train()
     else:
         print "=====testing====="
-        model.test(30000)
+        model.test()
 

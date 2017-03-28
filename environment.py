@@ -13,7 +13,7 @@ class AtariEnv(object):
     """
     a wrapper of the origin gym env class
     """
-    def __init__(self, env, frame_seq,frame_skip,lock_,screen_size=(84, 84)):
+    def __init__(self, env, frame_seq,frame_skip,lock_,screen_size=(84, 84),render=False):
         self.env = env
         self.screen_size = screen_size
         self.frame_skip = frame_skip
@@ -21,6 +21,7 @@ class AtariEnv(object):
         self.state = np.zeros(self.state_shape, dtype=np.float)
         self.lock = lock_
         self.count_ = 0
+        self.render=render
     @property
     def state_shape(self):
         return [self.frame_seq, self.screen_size[0], self.screen_size[1]]
@@ -43,9 +44,9 @@ class AtariEnv(object):
     def forward_action(self, action):
         obs, reward, done = None, None, None
         for _ in xrange(self.frame_skip):
-            if self.count_%20==0: 
-                with self.lock:
-                    self.env.render()
+            if self.render: 
+                #with self.lock:
+                self.env.render()
             obs, reward, done, _ = self.env.step(action)
             self.count_+=1
             if done:
