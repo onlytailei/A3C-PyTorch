@@ -170,8 +170,8 @@ class A3CSingleThread(threading.Thread):
         self.sync_network() 
         # optimizer is used to zero the old grad
         self.optim = optim.RMSprop(self.local_model.net.parameters())
-        dtype = torch.cuda.FloatTensor if torch.cuda.is_available() else torch.FloatTensor
-        self.local_model.net.type(dtype)
+        #dtype = torch.cuda.FloatTensor if torch.cuda.is_available() else torch.FloatTensor
+        self.local_model.net.type(torch.FloatTensor)
         self.loss_history = []
         self.win = None
     
@@ -181,10 +181,10 @@ class A3CSingleThread(threading.Thread):
     def apply_gadients(self):
         for share_i,local_i in zip(self.master.shared_net.parameters(),
                 self.local_model.net.parameters()):
-            share_i.grad.data = local_i.grad.data.clone()
+            #share_i.grad.data = local_i.grad.data.clone()
             
             # another way to update
-            # share_i._grad = local_i.grad
+            share_i._grad = local_i.grad
             
             #assert np.array_equal(share_i.grad.data.numpy(), local_i.grad.data.numpy())
 
@@ -277,7 +277,6 @@ class A3CSingleThread(threading.Thread):
             with self.master.lock:
                 self.apply_gadients()
                 self.args.train_step+=1
-            print self.args.train_step 
     def loss_visual(self,loss_, loop_):
         self.loss_history.append(loss_) 
         if loop_>2:

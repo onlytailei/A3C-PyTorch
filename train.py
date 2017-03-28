@@ -54,6 +54,8 @@ class A3CAtari(object):
         self.optim.step()
         self.main_update_step+=1
         self.logger.info("main update step %d", self.main_update_step)
+        if self.main_update_step%5000 == 0:
+            self.save_model(self.main_update_step)
         
         #assert(self.main_update_step<10)
     def save_model(self,name):
