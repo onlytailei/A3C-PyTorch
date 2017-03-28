@@ -52,17 +52,15 @@ class A3CAtari(object):
     
     def optim_shared_net(self):
         self.optim.step()
-        self.main_update_step+=1
         self.logger.info("main update step %d", self.main_update_step)
-        if self.main_update_step%5000 == 0:
+        if self.main_update_step%100 == 0:
             self.save_model(self.main_update_step)
-        
-        #assert(self.main_update_step<10)
+            self.logger.info("saved weight in %d", self.main_update_step) 
     def save_model(self,name):
-        torch.save(self.shared_net.state_dict(), './models/'+ name + '_weight')
+        torch.save(self.shared_net.state_dict(), './models/' + str(name) + '_weight')
     
     def load_model(self, name):
-        self.shared_net.load_state_dict(torch.load('./models/'+ name + '_weight'))
+        self.shared_net.load_state_dict(torch.load('./models/'+ str(name) + '_weight'))
 
 
 def signal_handler():

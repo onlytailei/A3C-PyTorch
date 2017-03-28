@@ -188,8 +188,6 @@ class A3CSingleThread(threading.Thread):
             
             #assert np.array_equal(share_i.grad.data.numpy(), local_i.grad.data.numpy())
 
-        self.master.optim_shared_net()
-
     def weighted_choose_action(self, pi_probs):
         r = random.uniform(0, sum(pi_probs))
         upto = 0
@@ -276,7 +274,8 @@ class A3CSingleThread(threading.Thread):
             self.loss_visual(loss, loop)
             with self.master.lock:
                 self.apply_gadients()
-                self.args.train_step+=1
+                self.master.optim_shared_net()
+                self.master.main_update_step += 1
     def loss_visual(self,loss_, loop_):
         self.loss_history.append(loss_) 
         if loop_>2:
