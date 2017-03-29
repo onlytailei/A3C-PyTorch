@@ -29,6 +29,8 @@ class A3CAtari(object):
             self.shared_net = A3CLSTMNet(self.env.state_shape, self.env.action_dim)
         else:
             self.shared_net = A3CNet(self.env.state_shape, self.env.action_dim)
+        dtype = torch.cuda.FloatTensor if torch.cuda.is_available() else torch.FloatTensor
+        self.shared_net.type(dtype)
         self.optim = optim.RMSprop(self.shared_net.parameters(),self.args.lr) 
         # training threads
         self.jobs = []
@@ -61,14 +63,14 @@ class A3CAtari(object):
         self.env.reset_env()
         while not terminal:
             state_tensor = autograd.Variable(
-                    torch.from_numpy(self.env.state).float())
+                    torch.from_numpy(self.env.state).float().cuda())
             if self.args.use_lstm:
                 pl, v, hidden = self.shared_net(
                         state_tensor,hidden)
             else:
                 pl, v = self.shared_net(state_tensor)
-            print pl.data.numpy()[0]
-            action = self.weighted_choose_action(pl.data.numpy()[0])
+            print pl.cpu().data.numpy()[0]
+            action = self.weighted_choose_action(pl.cpu().data.numpy()[0])
             _, reward, terminal = self.env.forward_action(action)
             reward_ += reward
         print reward_
@@ -116,7 +118,7 @@ def loggerConfig():
 
 parser = argparse.ArgumentParser()
 parser.add_argument("--game", type = str, 
-        default = 'Breakout-v0',
+        default = 'PongDeterministic-v3',
         help = "gym environment name")
 parser.add_argument("--train_dir", type = str, 
         default = './models/',
@@ -152,7 +154,7 @@ parser.add_argument("--opt", type = str,
         default = "rms", 
         help = "choice in [rms, adam, sgd]")
 parser.add_argument("--lr", type = float,
-        default = 1e-4, 
+        default = 1e-6, 
         help = "learning rate")
 parser.add_argument("--grad_clip", type = float,
         default = 40.0, 

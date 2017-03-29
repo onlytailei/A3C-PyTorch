@@ -44,9 +44,9 @@ class AtariEnv(object):
     def forward_action(self, action):
         obs, reward, done = None, None, None
         for _ in xrange(self.frame_skip):
-            if self.render: 
+            #if self.render: 
                 #with self.lock:
-                self.env.render()
+                #self.env.render()
             obs, reward, done, _ = self.env.step(action)
             self.count_+=1
             if done:

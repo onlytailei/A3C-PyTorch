@@ -29,7 +29,6 @@ class A3CLSTMNet(nn.Module):
         self.action_dim = action_dim
         self.conv1 = nn.Conv2d(self.state_shape[0],16,8,stride=4)
         self.conv2 = nn.Conv2d(16,32,4,stride=2)
-        self.conv2 = nn.Conv2d(16,32,4,stride=2)
         self.linear0 = nn.Linear(9*9*32, 256)
         self.lstm = nn.LSTM(256,256,1,dropout=0.5)
         # hang policy output
@@ -51,7 +50,7 @@ class A3CLSTMNet(nn.Module):
         x,hidden = self.lstm(x, hidden)
         x = x.view(-1,256)
         pl = F.relu(self.linear_policy_1(x))
-        pl = F.relu(self.linear_policy_2(pl))
+        pl = self.linear_policy_2(pl)
         pl = self.softmax_policy(pl)
         v = F.relu(self.linear_value_1(x))
         v = F.relu(self.linear_value_2(v))
@@ -78,7 +77,6 @@ class A3CNet(nn.Module):
         self.state_shape = state_shape 
         self.action_dim = action_dim
         self.conv1 = nn.Conv2d(self.state_shape[0],16,8,stride=4)
-        self.conv2 = nn.Conv2d(16,32,4,stride=2)
         self.conv2 = nn.Conv2d(16,32,4,stride=2)
         self.linear0 = nn.Linear(9*9*32, 256)
         # hang policy output
@@ -124,12 +122,13 @@ class A3CModel(object):
         state = np.array(rollout_path_['state'])
         target_q = np.array(rollout_path_['returns'])
         action = np.array(rollout_path_['action'])
+        tensor_target_q = torch.from_numpy(target_q).float().cuda()
         
         batch_size = state.shape[0]
         
-        batch_state =  autograd.Variable(torch.from_numpy(state).float())
-        batch_action = autograd.Variable(torch.from_numpy(action).float().view(-1,self.action_dim,1))
-        batch_target_q = autograd.Variable(torch.from_numpy(target_q).float())
+        batch_state =  autograd.Variable(torch.from_numpy(state).float().cuda())
+        batch_action = autograd.Variable(torch.from_numpy(action).float().view(-1,self.action_dim,1).cuda())
+        batch_target_q = autograd.Variable(tensor_target_q)
         if self.args.use_lstm:
             hidden = (autograd.Variable(lstm_hidden[0]),
                         autograd.Variable(lstm_hidden[1]))
@@ -138,18 +137,16 @@ class A3CModel(object):
         else:
             pl,v = self.net(batch_state)
         pl = pl.view(-1,1,self.action_dim)
-        
         pl_prob = torch.squeeze(torch.bmm(pl,batch_action))
         pl_log = torch.log(pl_prob) 
-        diff = torch.from_numpy(target_q-v.data.numpy().reshape(-1)).float()
-        
+        diff = tensor_target_q-v.data
         pl_loss = - torch.dot(pl_log, autograd.Variable(diff))
         v_loss = self.v_criterion(v, batch_target_q) * batch_size 
-        entropy = -torch.dot(pl_prob, torch.log(pl_prob + self.args.eps))
-        
-        loss_all = 0.5* v_loss + self.args.entropy_beta*entropy + pl_loss
+        entropy = torch.dot(pl_prob, torch.log(pl_prob))
+        loss_all = 0.5* v_loss + pl_loss
         loss_all.backward()
-        return  loss_all.data.numpy()
+        self.logger_.info("pl_loss %f, v_loss %f, entropy_loss %f", pl_loss.cpu().data.numpy()[0], v_loss.cpu().data.numpy()[0], entropy.cpu().data.numpy()[0])
+        return  loss_all.cpu().data.numpy()
         
         # another way for val loss
         #v_prime = torch.sum((target_q_torch-v)*(target_q_torch-v),0)
@@ -170,8 +167,8 @@ class A3CSingleThread(threading.Thread):
         self.sync_network() 
         # optimizer is used to zero the old grad
         self.optim = optim.RMSprop(self.local_model.net.parameters())
-        #dtype = torch.cuda.FloatTensor if torch.cuda.is_available() else torch.FloatTensor
-        self.local_model.net.type(torch.FloatTensor)
+        dtype = torch.cuda.FloatTensor if torch.cuda.is_available() else torch.FloatTensor
+        self.local_model.net.type(dtype)
         self.loss_history = []
         self.win = None
     
@@ -206,14 +203,14 @@ class A3CSingleThread(threading.Thread):
                     autograd.Variable(self.lstm_c_init))
         while not terminal and (train_step - t_start <= self.args.t_max):
             state_tensor = autograd.Variable(
-                    torch.from_numpy(self.env.state).float())
+                    torch.from_numpy(self.env.state).float().cuda())
             if self.args.use_lstm:
                 pl, v, hidden = self.local_model.net(state_tensor,hidden)
             else:
                 pl, v = self.local_model.net(state_tensor)
             
             if random.random() < 0.8:
-                action = self.weighted_choose_action(pl.data.numpy()[0])
+                action = self.weighted_choose_action(pl.cpu().data.numpy()[0])
             else:
                 action = random.randint(0, self.env.action_dim - 1)
             
@@ -243,8 +240,8 @@ class A3CSingleThread(threading.Thread):
             self.optim.zero_grad()    
             
             if self.args.use_lstm:
-                self.lstm_h_init = torch.randn(1,1,256)
-                self.lstm_c_init = torch.randn(1,1,256)
+                self.lstm_h_init = torch.randn(1,1,256).cuda()
+                self.lstm_c_init = torch.randn(1,1,256).cuda()
                 train_step, rollout_path, hidden= self.forward_explore(train_step)
             else: 
                 train_step, rollout_path = self.forward_explore(train_step)
@@ -255,14 +252,14 @@ class A3CSingleThread(threading.Thread):
             
             elif self.args.use_lstm:
                 state_tensor = autograd.Variable(torch.from_numpy(
-                        rollout_path["state"][-1]).float()) 
+                        rollout_path["state"][-1]).float().cuda()) 
                 _, v_t, _ = self.local_model.net(state_tensor,hidden)
                 rollout_path["rewards"][-1] = v_t.data.numpy()
             else:
                 state_tensor = autograd.Variable(torch.from_numpy(
-                        rollout_path["state"][-1]).float()) 
+                        rollout_path["state"][-1]).float().cuda()) 
                 _, v_t = self.local_model.net(state_tensor)
-                rollout_path["rewards"][-1] = v_t.data.numpy()
+                rollout_path["rewards"][-1] = v_t.cpu().data.numpy()
             # calculate rewards 
             rollout_path["returns"] = self.discount(rollout_path["rewards"])
             
