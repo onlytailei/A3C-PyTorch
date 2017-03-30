@@ -84,51 +84,6 @@ class A3CLSTMNet(nn.Module):
         v = self.linear_value_1(x)
         return pl,v,hidden
 
-class A3CModel(object):
-    """
-    add PathBackProp compared with A3CNet
-    """
-    def __init__(self, state_shape,action_dim, args_, logger_):
-        
-        self.net = A3CLSTMNet(state_shape,action_dim)
-        self.action_dim = action_dim 
-        self.v_criterion = nn.MSELoss() 
-        self.args = args_ 
-        self.logger_ = logger_ 
-    
-    def PathBackProp(self,rollout_path_, lstm_hidden=None):
-        # backprop of the network both policy and value
-        state = np.array(rollout_path_['state'])
-        target_q = np.array(rollout_path_['returns'])
-        action = np.array(rollout_path_['action'])
-        tensor_target_q = torch.from_numpy(target_q).float().cuda()
-        
-        batch_size = state.shape[0]
-        
-        batch_state =  Variable(torch.from_numpy(state).float().cuda())
-        batch_action = Variable(torch.from_numpy(action).float().view(-1,self.action_dim,1).cuda())
-        batch_target_q = Variable(tensor_target_q)
-        
-        hidden = (Variable(lstm_hidden[0]),
-                        Variable(lstm_hidden[1]))
-        pl, v, hidden = self.net(batch_state,hidden)
-        pl = pl.view(-1,1,self.action_dim)
-        pl_prob = torch.squeeze(torch.bmm(pl,batch_action))
-        pl_log = torch.log(pl_prob) 
-        diff = tensor_target_q-v.data
-        entropy = -torch.dot(pl_prob, torch.log(pl_prob))
-        pl_loss = -(torch.dot(pl_log, Variable(diff)) + entropy * self.args.entropy_beta )
-        v_loss = self.v_criterion(v, batch_target_q) * batch_size 
-        loss_all = 0.5* v_loss + pl_loss
-        loss_all.backward()
-        self.logger_.info("pl_loss %f, v_loss %f, entropy_loss %f", pl_loss.cpu().data.numpy()[0], v_loss.cpu().data.numpy()[0], entropy.cpu().data.numpy()[0])
-        return  loss_all.cpu().data.numpy()
-        
-        # another way for val loss
-        #v_prime = torch.sum((target_q_torch-v)*(target_q_torch-v),0)
-        #assert v_loss.data.numpy() == v_prime.data.numpy()
-
-
 class A3CSingleProcess(mp.Process):
     
     def __init__(self, process_id, master, logger_):
@@ -177,13 +132,11 @@ class A3CSingleProcess(mp.Process):
             pl_roll.append(pl)
             v_roll.append(v)
             
-            action = prob.multinomial().data
+            action = pl.multinomial().data
             _, reward, terminal = self.env.forward_action(action)
             
             rollout_path["state"].append(self.env.state)
-            one_hot_action = np.zeros(self.env.action_dim)
-            one_hot_action[action] = 1
-            rollout_path["action"].append(one_hot_action.reshape(self.env.action_dim,1))
+            rollout_path["action"].append(action)
             rollout_path["rewards"].append(reward)
             rollout_path["done"].append(terminal) 
         
@@ -218,17 +171,7 @@ class A3CSingleProcess(mp.Process):
             rollout_path["returns"] = self.discount(rollout_path["rewards"])
             
             self.PathBackProp(rollout_path, p_roll, v_roll)
-
-            self.logger_.info("process %d, step %d, loss %f", self.process_id, loop, loss)
             self.loss_visual(loss, loop)
-
-            self.optimizer.zero_grad()
-
-            (policy_loss + 0.5 * value_loss).backward()
-            torch.nn.utils.clip_grad_norm(self.local_model.parameters(), 40)
-            self.ensure_shared_grads(self.local_model, self.shared_model)
-            self.optimizer.step()
-            
             self.master.main_update_step += 1
             self.sync_network()
 
@@ -249,28 +192,29 @@ class A3CSingleProcess(mp.Process):
         state = np.array(rollout_path_['state'])
         target_q = np.array(rollout_path_['returns'])
         action = np.array(rollout_path_['action'])
-        tensor_target_q = torch.from_numpy(target_q).float()
+        #tensor_target_q = torch.from_numpy(target_q).float()
        
-
+        policy_loss = 0
+        value_loss = 0
+        gae = torch.zeros(1)
         for (i, item) in enumerate(p_roll):
-            item
+            log_prob = torch.log(item)
+            entropy = - torch.dot(log_prob, prob)
+            log_prob_ = log_prob.gather(1, Variable(action[i]))
+            advantage = Variable(torch.from_numpy(target_q[i]).float())-v_roll[i] 
+            
+            value_loss = value_loss + 0.5 * advantage.pow(2)
+            gae = gae * self.args.gamma + advantage.data
+            
+            policy_loss = policy_loss - log_prob_ * Variable(gae.data) - 0.01 * entropy 
 
-
-
-        batch_size = state.shape[0]
-        
-        batch_state =  Variable(torch.from_numpy(state).float())
-        batch_action = Variable(torch.from_numpy(action).float().view(-1,self.action_dim,1))
-        batch_target_q = Variable(tensor_target_q)
-        
-        pl = pl.view(-1,1,self.action_dim)
-        pl_prob = torch.squeeze(torch.bmm(pl,batch_action))
-        pl_log = torch.log(pl_prob) 
-        diff = tensor_target_q-v.data
-        entropy = -torch.dot(pl_prob, torch.log(pl_prob))
-        pl_loss = -(torch.dot(pl_log, Variable(diff)) + entropy * self.args.entropy_beta )
-        v_loss = self.v_criterion(v, batch_target_q) * batch_size 
-        loss_all = 0.5* v_loss + pl_loss
+        self.optimizer.zero_grad()
+        loss_all = 0.5* value_loss + policy_loss
         loss_all.backward()
-        self.logger_.info("pl_loss %f, v_loss %f, entropy_loss %f", pl_loss.cpu().data.numpy()[0], v_loss.cpu().data.numpy()[0], entropy.cpu().data.numpy()[0])
+        torch.nn.utils.clip_grad_norm(self.local_model.parameters(), 40)
+        self.ensure_shared_grads(self.local_model,self.shared_model)
+        self.optimizer.step()
+        self.logger_.info("pl_loss %f, v_loss %f", 
+                pl_loss.cpu().data.numpy()[0], 
+                v_loss.cpu().data.numpy()[0])
         return  loss_all.cpu().data.numpy()
