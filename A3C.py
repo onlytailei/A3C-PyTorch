@@ -14,7 +14,7 @@ import random
 import torch.nn as nn
 import torch.nn.functional as F
 from torch.nn.parameter import Parameter
-import torch.autograd.Variable as Variable
+from torch.autograd import Variable
 import torch.optim as optim
 from environment import AtariEnv
 import torch.multiprocessing as mp
@@ -78,11 +78,11 @@ class A3CLSTMNet(nn.Module):
         x = F.relu(self.conv3(x))
         x = F.relu(self.conv4(x))
         x = x.view(-1, 3*3*32) 
-        x,hidden = self.lstm(x, hidden)
+        x,c = self.lstm(x, (hidden[0],hidden[1]))
         pl = self.linear_policy_1(x)
         pl = self.softmax_policy(pl)
         v = self.linear_value_1(x)
-        return pl,v,hidden
+        return pl,v,(x,c)
 
 class A3CSingleProcess(mp.Process):
     
@@ -100,12 +100,12 @@ class A3CSingleProcess(mp.Process):
         self.win = None
     
     def sync_network(self): 
-        self.local_model.net.load_state_dict(self.master.shared_model.state_dict()) 
+        self.local_model.load_state_dict(self.master.shared_model.state_dict()) 
     
     def apply_gadients(self):
         for share_i,local_i in zip(
                 self.master.shared_model.parameters(),
-                self.local_model.net.parameters()):
+                self.local_model.parameters()):
             share_i._grad = local_i.grad
             #assert np.array_equal(share_i.grad.data.numpy(), local_i.grad.data.numpy())
 
@@ -126,21 +126,23 @@ class A3CSingleProcess(mp.Process):
         v_roll = []
         while not terminal and (t_start <= self.args.t_max):
             t_start += 1
+            state_ = self.env.state
             state_tensor = Variable(
-                    torch.from_numpy(self.env.state).float())
-            pl, v, hidden = self.local_model.net(state_tensor,hidden)
+                    torch.from_numpy(state_).float())
+            
+            pl, v, hidden = self.local_model(state_tensor,hidden)
             pl_roll.append(pl)
             v_roll.append(v)
             
-            action = pl.multinomial().data
+            action = pl.multinomial().data.numpy()[0]
             _, reward, terminal = self.env.forward_action(action)
             
-            rollout_path["state"].append(self.env.state)
+            rollout_path["state"].append(state_)
             rollout_path["action"].append(action)
             rollout_path["rewards"].append(reward)
             rollout_path["done"].append(terminal) 
         
-        return rollout_path, hidden, p_roll, v_roll
+        return rollout_path, hidden, pl_roll, v_roll
         
     def discount(self, x):
         return scipy.signal.lfilter([1], [1, -self.args.gamma], x[::-1], axis=0)[::-1]
@@ -148,21 +150,21 @@ class A3CSingleProcess(mp.Process):
     def run(self):
         self.env.reset_env()
         loop = 0
-        lstm_h = Variable(torch.zeros(1,1,256))
-        lstm_c = Variable(torch.zeros(1,1,256))
-        for _step in range(self.args.t_train):
+        lstm_h = Variable(torch.zeros(1,256))
+        lstm_c = Variable(torch.zeros(1,256))
+        while True:
             loop += 1
             rollout_path, (lstm_h,lstm_c), p_roll, v_roll= self.forward_explore((lstm_h,lstm_c))
             
             if rollout_path["done"][-1]:
                 rollout_path["rewards"][-1] = 0
                 self.env.reset_env()
-                lstm_h = Variable(torch.zeros(1,1,256))
-                lstm_c = Variable(torch.zeros(1,1,256))
+                lstm_h = Variable(torch.zeros(1,256))
+                lstm_c = Variable(torch.zeros(1,256))
             else:
                 state_tensor = Variable(torch.from_numpy(
-                    rollout_path["state"][-1]).float()) 
-                _, v_t, _ = self.local_model.net(state_tensor,(lstm_h,lstm_c))
+                    self.env.state).float()) 
+                _, v_t, _ = self.local_model(state_tensor,(lstm_h,lstm_c))
                 lstm_h = Variable(lstm_h.data) 
                 lstm_c = Variable(lstm_c.data) 
                 rollout_path["rewards"][-1] = v_t.data.numpy()
@@ -170,7 +172,7 @@ class A3CSingleProcess(mp.Process):
             # calculate rewards 
             rollout_path["returns"] = self.discount(rollout_path["rewards"])
             
-            self.PathBackProp(rollout_path, p_roll, v_roll)
+            loss = self.PathBackProp(rollout_path, p_roll, v_roll)
             self.loss_visual(loss, loop)
             self.master.main_update_step += 1
             self.sync_network()
@@ -193,28 +195,27 @@ class A3CSingleProcess(mp.Process):
         target_q = np.array(rollout_path_['returns'])
         action = np.array(rollout_path_['action'])
         #tensor_target_q = torch.from_numpy(target_q).float()
-       
         policy_loss = 0
         value_loss = 0
-        gae = torch.zeros(1)
+        gae = torch.zeros(1,1)
         for (i, item) in enumerate(p_roll):
             log_prob = torch.log(item)
-            entropy = - torch.dot(log_prob, prob)
-            log_prob_ = log_prob.gather(1, Variable(action[i]))
-            advantage = Variable(torch.from_numpy(target_q[i]).float())-v_roll[i] 
+            entropy = - torch.dot(log_prob, item)
+            log_prob_ = log_prob.gather(1, Variable(torch.from_numpy(action[i].reshape(1,1))))
+            advantage = Variable(torch.from_numpy(np.array(target_q[i]).reshape(1,1)).float())-v_roll[i] 
             
             value_loss = value_loss + 0.5 * advantage.pow(2)
             gae = gae * self.args.gamma + advantage.data
             
-            policy_loss = policy_loss - log_prob_ * Variable(gae.data) - 0.01 * entropy 
+            policy_loss = policy_loss - log_prob_ * Variable(gae) - 0.01 * entropy 
 
-        self.optimizer.zero_grad()
+        self.master.optim.zero_grad()
         loss_all = 0.5* value_loss + policy_loss
         loss_all.backward()
         torch.nn.utils.clip_grad_norm(self.local_model.parameters(), 40)
-        self.ensure_shared_grads(self.local_model,self.shared_model)
-        self.optimizer.step()
+        self.ensure_shared_grads(self.local_model,self.master.shared_model)
+        self.master.optim.step()
         self.logger_.info("pl_loss %f, v_loss %f", 
-                pl_loss.cpu().data.numpy()[0], 
-                v_loss.cpu().data.numpy()[0])
-        return  loss_all.cpu().data.numpy()
+                policy_loss.data.numpy()[0], 
+                value_loss.data.numpy()[0])
+        return  loss_all.data.numpy()

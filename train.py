@@ -55,51 +55,26 @@ class A3CAtari(object):
     def test(self):
         terminal = False
         reward_ = 0
-        if self.args.use_lstm:
-            hidden = (autograd.Variable(self.lstm_h_init), 
-                    autograd.Variable(self.lstm_c_init))
+        lstm_h = Variable(torch.zeros(1,256))
+        lstm_c = Variable(torch.zeros(1,256))
         self.env.reset_env()
         while not terminal:
             state_tensor = autograd.Variable(
-                    torch.from_numpy(self.env.state).float().cuda())
-            if self.args.use_lstm:
-                pl, v, hidden = self.shared_model(
-                        state_tensor,hidden)
-            else:
-                pl, v = self.shared_model(state_tensor)
-            print pl.cpu().data.numpy()[0]
-            action = self.weighted_choose_action(pl.cpu().data.numpy()[0])
+                    torch.from_numpy(self.env.state).float())
+            pl, v, (lstm_h,lstm_c) = self.shared_model(state_tensor,(lstm_h,lstm_c))
+            print pl.data.numpy()[0]
+            action = prob.max(1)[1].data.numpy()
             #action = np.argmax(pl.cpu().data.numpy()[0])
-            _, reward, terminal = self.env.forward_action(action)
+            _, reward, terminal = self.env.forward_action(action[0])
             reward_ += reward
         print reward_
         return reward_
-    
-    def weighted_choose_action(self, pi_probs):
-        r = random.uniform(0, sum(pi_probs))
-        upto = 0
-        for idx, prob in enumerate(pi_probs):
-            if upto + prob >= r:
-                return idx
-            upto += prob
-        return len(pi_probs) - 1
-
-    def optim_shared_model(self):
-        self.optim.step()
-        self.logger.info("main update step %d", self.main_update_step)
-        if self.main_update_step%5000 == 0:
-            self.save_model(self.main_update_step)
-            self.logger.info("saved weight in %d", self.main_update_step) 
     
     def save_model(self,name):
         torch.save(self.shared_model.state_dict(), self.args.train_dir + str(name) + '_weight')
     
     def load_model(self, name):
         self.shared_model.load_state_dict(torch.load(self.args.train_dir + str(name) + '_weight'))
-
-
-def signal_handler():
-    sys.exit(0)
 
 
 def loggerConfig():
@@ -130,7 +105,7 @@ parser.add_argument("--use_lstm", type = int,
         default = 0, 
         help = "use LSTM layer")
 parser.add_argument("--t_max", type = int, 
-        default = 6,
+        default = 20,
         help = "episode max time step")
 parser.add_argument("--t_train", type = int,
         default = 1e9, 
@@ -142,7 +117,7 @@ parser.add_argument("--t_flag", type = int,
         default = 1, 
         help = "training flag")
 parser.add_argument("--jobs", type = int, 
-        default = 16, 
+        default = 8, 
         help = "parallel running thread number")
 parser.add_argument("--frame_skip", type = int,
         default = 1, 
@@ -154,7 +129,7 @@ parser.add_argument("--opt", type = str,
         default = "rms", 
         help = "choice in [rms, adam, sgd]")
 parser.add_argument("--lr", type = float,
-        default = 1e-5, 
+        default = 1e-4, 
         help = "learning rate")
 parser.add_argument("--grad_clip", type = float,
         default = 40.0, 
