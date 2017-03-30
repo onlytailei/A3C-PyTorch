@@ -18,6 +18,7 @@ import time
 from environment import AtariEnv
 from A3C import *
 import visdom
+import torch.multiprocessing as mp
 
 class A3CAtari(object):
     
@@ -43,6 +44,7 @@ class A3CAtari(object):
         self.main_update_step = 0
         if self.args.load_weight !=0 :
             self.load_model(self.args.load_weight)
+    
     def train(self):
         self.args.train_step = 0  
         signal.signal(signal.SIGINT, signal_handler)
@@ -71,6 +73,7 @@ class A3CAtari(object):
                 pl, v = self.shared_net(state_tensor)
             print pl.cpu().data.numpy()[0]
             action = self.weighted_choose_action(pl.cpu().data.numpy()[0])
+            #action = np.argmax(pl.cpu().data.numpy()[0])
             _, reward, terminal = self.env.forward_action(action)
             reward_ += reward
         print reward_
@@ -154,7 +157,7 @@ parser.add_argument("--opt", type = str,
         default = "rms", 
         help = "choice in [rms, adam, sgd]")
 parser.add_argument("--lr", type = float,
-        default = 1e-6, 
+        default = 1e-5, 
         help = "learning rate")
 parser.add_argument("--grad_clip", type = float,
         default = 40.0, 

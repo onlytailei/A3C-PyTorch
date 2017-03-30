@@ -13,7 +13,7 @@ class AtariEnv(object):
     """
     a wrapper of the origin gym env class
     """
-    def __init__(self, env, frame_seq,frame_skip,lock_,screen_size=(84, 84),render=False):
+    def __init__(self, env, frame_seq,frame_skip,lock_,screen_size=(42, 42),render=False):
         self.env = env
         self.screen_size = screen_size
         self.frame_skip = frame_skip
@@ -22,6 +22,7 @@ class AtariEnv(object):
         self.lock = lock_
         self.count_ = 0
         self.render=render
+    
     @property
     def state_shape(self):
         return [self.frame_seq, self.screen_size[0], self.screen_size[1]]
@@ -30,10 +31,15 @@ class AtariEnv(object):
     def action_dim(self):
         return self.env.action_space.n
 
-    def precess_image(self, image):
-        image = cv2.cvtColor(cv2.resize(image, self.screen_size), cv2.COLOR_BGR2GRAY)
-        image = np.divide(image, 256.0)
-        return image
+    def precess_image(self, frame):
+        frame = frame[34:34 + 160, :160]
+        frame = cv2.resize(frame, (80, 80))
+        frame = cv2.resize(frame, (42, 42))
+        frame = frame.mean(2)
+        frame = frame.astype(np.float32)
+        frame *= (1.0 / 255.0)
+        frame = np.reshape(frame, [1, 42, 42])
+        return frame
 
     def reset_env(self):
         obs = self.env.reset()
@@ -44,15 +50,14 @@ class AtariEnv(object):
     def forward_action(self, action):
         obs, reward, done = None, None, None
         for _ in xrange(self.frame_skip):
-            #if self.render: 
+            if self.render: 
                 #with self.lock:
-                #self.env.render()
+                self.env.render()
             obs, reward, done, _ = self.env.step(action)
             self.count_+=1
             if done:
                 break
         obs = self.precess_image(obs)
-        obs = np.reshape(obs, newshape=[1] + list(self.screen_size))
         self.state = np.append(self.state[1:, :, :], obs, axis=0)
         # clip reward in range(-1, 1)
         reward = np.clip(reward, -1, 1)
