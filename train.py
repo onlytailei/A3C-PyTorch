@@ -8,8 +8,6 @@ Info: A3C continuous control in PyTorch
 
 import numpy as np
 import argparse
-import signal
-import threading
 import torch.optim as optim
 import sys
 import os
@@ -19,35 +17,33 @@ from environment import AtariEnv
 from A3C import *
 import visdom
 import torch.multiprocessing as mp
+import my_optim
 
 class A3CAtari(object):
     
     def __init__(self, args_,logger_):
         self.args = args_
-        self.lock = threading.Lock()
-        self.env = AtariEnv(gym.make(self.args.game),args_.frame_seq,args_.frame_skip,self.lock,render = True)
-        if args_.use_lstm:
-            self.shared_net = A3CLSTMNet(self.env.state_shape, self.env.action_dim)
-        else:
-            self.shared_net = A3CNet(self.env.state_shape, self.env.action_dim)
-        dtype = torch.cuda.FloatTensor if torch.cuda.is_available() else torch.FloatTensor
-        self.shared_net.type(dtype)
-        self.optim = optim.RMSprop(self.shared_net.parameters(),self.args.lr) 
-        # training threads
-        self.jobs = []
-        self.vis = visdom.Visdom()
-        if self.args.t_flag:
-            for thread_id in xrange(self.args.jobs):
-                job = A3CSingleThread(thread_id, self, logger_)
-                self.jobs.append(job)
         self.logger = logger_
+        self.env = AtariEnv(gym.make(self.args.game),args_.frame_seq,args_.frame_skip,render = True)
+        self.shared_model = A3CLSTMNet(self.env.state_shape, self.env.action_dim)
+        self.shared_model.share_memory()
+        self.optim = my_optim.SharedAdam(self.shared_model.parameters(),lr=self.args.lr)  
+        self.optim.share_memory() 
+        # visdom
+        self.vis = visdom.Visdom()
         self.main_update_step = 0
+        # load model
         if self.args.load_weight !=0 :
             self.load_model(self.args.load_weight)
+        
+        self.jobs = []
+        if self.args.t_flag:
+            for process_id in xrange(self.args.jobs):
+                job = A3CSingleProcess(process_id, self, logger_)
+                self.jobs.append(job)
     
     def train(self):
         self.args.train_step = 0  
-        signal.signal(signal.SIGINT, signal_handler)
         for job in self.jobs:
             job.start()
         for job in self.jobs:
@@ -67,10 +63,10 @@ class A3CAtari(object):
             state_tensor = autograd.Variable(
                     torch.from_numpy(self.env.state).float().cuda())
             if self.args.use_lstm:
-                pl, v, hidden = self.shared_net(
+                pl, v, hidden = self.shared_model(
                         state_tensor,hidden)
             else:
-                pl, v = self.shared_net(state_tensor)
+                pl, v = self.shared_model(state_tensor)
             print pl.cpu().data.numpy()[0]
             action = self.weighted_choose_action(pl.cpu().data.numpy()[0])
             #action = np.argmax(pl.cpu().data.numpy()[0])
@@ -88,17 +84,18 @@ class A3CAtari(object):
             upto += prob
         return len(pi_probs) - 1
 
-    def optim_shared_net(self):
+    def optim_shared_model(self):
         self.optim.step()
         self.logger.info("main update step %d", self.main_update_step)
         if self.main_update_step%5000 == 0:
             self.save_model(self.main_update_step)
             self.logger.info("saved weight in %d", self.main_update_step) 
+    
     def save_model(self,name):
-        torch.save(self.shared_net.state_dict(), self.args.train_dir + str(name) + '_weight')
+        torch.save(self.shared_model.state_dict(), self.args.train_dir + str(name) + '_weight')
     
     def load_model(self, name):
-        self.shared_net.load_state_dict(torch.load(self.args.train_dir + str(name) + '_weight'))
+        self.shared_model.load_state_dict(torch.load(self.args.train_dir + str(name) + '_weight'))
 
 
 def signal_handler():

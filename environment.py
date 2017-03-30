@@ -7,19 +7,17 @@ Info:
 '''
 import numpy as np
 import cv2
-from threading import Lock
 
 class AtariEnv(object):
     """
     a wrapper of the origin gym env class
     """
-    def __init__(self, env, frame_seq,frame_skip,lock_,screen_size=(42, 42),render=False):
+    def __init__(self, env, frame_seq,frame_skip, screen_size=(42, 42),render=False):
         self.env = env
         self.screen_size = screen_size
         self.frame_skip = frame_skip
         self.frame_seq = frame_seq
         self.state = np.zeros(self.state_shape, dtype=np.float)
-        self.lock = lock_
         self.count_ = 0
         self.render=render
     
@@ -51,7 +49,6 @@ class AtariEnv(object):
         obs, reward, done = None, None, None
         for _ in xrange(self.frame_skip):
             if self.render: 
-                #with self.lock:
                 self.env.render()
             obs, reward, done, _ = self.env.step(action)
             self.count_+=1
@@ -60,5 +57,5 @@ class AtariEnv(object):
         obs = self.precess_image(obs)
         self.state = np.append(self.state[1:, :, :], obs, axis=0)
         # clip reward in range(-1, 1)
-        reward = np.clip(reward, -1, 1)
+        #reward = np.clip(reward, -1, 1)
         return self.state, reward, done

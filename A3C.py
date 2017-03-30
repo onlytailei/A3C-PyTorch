@@ -8,19 +8,39 @@ Info:
 
 import gym
 import scipy.signal
-import threading
 import torch
 import numpy as np
 import random
 import torch.nn as nn
 import torch.nn.functional as F
 from torch.nn.parameter import Parameter
-import torch.autograd as autograd
+import torch.autograd.Variable as Variable
 import torch.optim as optim
 from environment import AtariEnv
 import torch.multiprocessing as mp
 import multiprocessing
 
+def normalized_columns_initializer(weights, std=1.0):
+    out = torch.randn(weights.size())
+    out *= std / torch.sqrt(out.pow(2).sum(1).expand_as(out))
+    return out
+
+def weights_init(m):
+    classname = m.__class__.__name__
+    if classname.find('Conv') != -1:
+        weight_shape = list(m.weight.data.size())
+        fan_in = np.prod(weight_shape[1:4])
+        fan_out = np.prod(weight_shape[2:4]) * weight_shape[0]
+        w_bound = np.sqrt(6. / (fan_in + fan_out))
+        m.weight.data.uniform_(-w_bound, w_bound)
+        m.bias.data.fill_(0)
+    elif classname.find('Linear') != -1:
+        weight_shape = list(m.weight.data.size())
+        fan_in = weight_shape[1]
+        fan_out = weight_shape[0]
+        w_bound = np.sqrt(6. / (fan_in + fan_out))
+        m.weight.data.uniform_(-w_bound, w_bound)
+        m.bias.data.fill_(0)
 
 class A3CLSTMNet(nn.Module):
 
@@ -32,13 +52,24 @@ class A3CLSTMNet(nn.Module):
         self.conv2 = nn.Conv2d(32,32,3,stride=2, padding = 1)
         self.conv3 = nn.Conv2d(32,32,3,stride=2, padding = 1)
         self.conv4 = nn.Conv2d(32,32,3,stride=2, padding = 1)
-        self.lstm = nn.LSTM(3*3*32,256,1)
+        self.lstm = nn.LSTMCell(3*3*32,256,1)
         # hang policy output
         self.linear_policy_1 = nn.Linear(256,self.action_dim)
         self.softmax_policy = nn.Softmax()
         # hang value output
         self.linear_value_1 = nn.Linear(256,1)
+        
+        self.apply(weights_init)
+        self.linear_policy_1.weight.data = normalized_columns_initializer(
+            self.linear_policy_1.weight.data, 0.01)
+        self.linear_policy_1.bias.data.fill_(0)
+        self.linear_value_1.weight.data = normalized_columns_initializer(
+            self.linear_value_1.weight.data, 1.0)
+        self.linear_value_1.bias.data.fill_(0)
 
+        self.lstm.bias_ih.data.fill_(0)
+        self.lstm.bias_hh.data.fill_(0)
+    
     def forward(self, x, hidden):
         x = x.view(-1, self.state_shape[0], 
                 self.state_shape[1],self.state_shape[2]) 
@@ -46,61 +77,12 @@ class A3CLSTMNet(nn.Module):
         x = F.relu(self.conv2(x))
         x = F.relu(self.conv3(x))
         x = F.relu(self.conv4(x))
-        x = x.view(-1, 1,3*3*32) 
+        x = x.view(-1, 3*3*32) 
         x,hidden = self.lstm(x, hidden)
-        x = x.view(-1,256)
         pl = self.linear_policy_1(x)
         pl = self.softmax_policy(pl)
         v = self.linear_value_1(x)
         return pl,v,hidden
-    
-     #def init_hidden(self):
-        #return (Variable(torch.randn(1, 1, 256)),
-                #Variable(torch.randn(1, 1, 256)))
-    
-    #def weights_init(m):
-        #classname = m.__class__.__name__
-        #if classname.find('LSTMCell') != -1:
-            #weight_shape = list(m.weight.data.size())
-            #fan_in = np.prod(weight_shape[1:4])
-            #fan_out = np.prod(weight_shape[2:4]) * weight_shape[0]
-            #w_bound = np.sqrt(6. / (fan_in + fan_out))
-            #m.weight.data.uniform_(-w_bound, w_bound)
-            #m.bias.data.fill_(0)
-
-class A3CNet(nn.Module):
-
-    def __init__(self, state_shape, action_dim):
-        super(A3CNet, self).__init__()
-        self.state_shape = state_shape 
-        self.action_dim = action_dim
-        self.conv1 = nn.Conv2d(self.state_shape[0],32,3,stride=2)
-        self.conv2 = nn.Conv2d(32,32,3,stride=2,padding = 1)
-        self.conv3 = nn.Conv2d(32,32,3,stride=2,padding = 1)
-        self.conv4 = nn.Conv2d(32,32,3,stride=2,padding = 1)
-        # hang policy output
-        self.linear_policy_1 = nn.Linear(3*3*32,256)
-        self.linear_policy_2 = nn.Linear(256,self.action_dim)
-        self.softmax_policy = nn.Softmax()
-        # hang value output
-        self.linear_value_1 = nn.Linear(3*3*32,256)
-        self.linear_value_2 = nn.Linear(256,1)
-
-    def forward(self,x):
-        x = x.view(-1, self.state_shape[0], 
-                self.state_shape[1],self.state_shape[2]) 
-        x = F.relu(self.conv1(x))
-        x = F.relu(self.conv2(x))
-        x = F.relu(self.conv3(x))
-        x = F.relu(self.conv4(x))
-        x = x.view(-1, 3*3*32) 
-        pl = F.relu(self.linear_policy_1(x))
-        pl = self.linear_policy_2(pl)
-        pl = self.softmax_policy(pl)
-        v = F.relu(self.linear_value_1(x))
-        v = self.linear_value_2(v)
-        return pl,v
-
 
 class A3CModel(object):
     """
@@ -108,10 +90,7 @@ class A3CModel(object):
     """
     def __init__(self, state_shape,action_dim, args_, logger_):
         
-        if args_.use_lstm:
-            self.net = A3CLSTMNet(state_shape,action_dim)
-        else:
-            self.net = A3CNet(state_shape,action_dim)
+        self.net = A3CLSTMNet(state_shape,action_dim)
         self.action_dim = action_dim 
         self.v_criterion = nn.MSELoss() 
         self.args = args_ 
@@ -126,21 +105,19 @@ class A3CModel(object):
         
         batch_size = state.shape[0]
         
-        batch_state =  autograd.Variable(torch.from_numpy(state).float().cuda())
-        batch_action = autograd.Variable(torch.from_numpy(action).float().view(-1,self.action_dim,1).cuda())
-        batch_target_q = autograd.Variable(tensor_target_q)
-        if self.args.use_lstm:
-            hidden = (autograd.Variable(lstm_hidden[0]),
-                        autograd.Variable(lstm_hidden[1]))
-            pl, v, hidden = self.net(batch_state,hidden)
-        else:
-            pl,v = self.net(batch_state)
+        batch_state =  Variable(torch.from_numpy(state).float().cuda())
+        batch_action = Variable(torch.from_numpy(action).float().view(-1,self.action_dim,1).cuda())
+        batch_target_q = Variable(tensor_target_q)
+        
+        hidden = (Variable(lstm_hidden[0]),
+                        Variable(lstm_hidden[1]))
+        pl, v, hidden = self.net(batch_state,hidden)
         pl = pl.view(-1,1,self.action_dim)
         pl_prob = torch.squeeze(torch.bmm(pl,batch_action))
         pl_log = torch.log(pl_prob) 
         diff = tensor_target_q-v.data
         entropy = -torch.dot(pl_prob, torch.log(pl_prob))
-        pl_loss = -(torch.dot(pl_log, autograd.Variable(diff)) + entropy * self.args.entropy_beta )
+        pl_loss = -(torch.dot(pl_log, Variable(diff)) + entropy * self.args.entropy_beta )
         v_loss = self.v_criterion(v, batch_target_q) * batch_size 
         loss_all = 0.5* v_loss + pl_loss
         loss_all.backward()
@@ -152,38 +129,29 @@ class A3CModel(object):
         #assert v_loss.data.numpy() == v_prime.data.numpy()
 
 
-class A3CSingleThread(multiprocessing.Process):
+class A3CSingleProcess(mp.Process):
     
-    def __init__(self, thread_id, master, logger_):
-        super(A3CSingleThread, self).__init__(self, name="process_%d" % thread_id)
-        self.thread_id = thread_id
+    def __init__(self, process_id, master, logger_):
+        super(A3CSingleProcess, self).__init__(name="process_%d" % process_id)
+        self.process_id = process_id
         self.logger_ = logger_
-        
-        #multiprocessing.Process.__init__(self, name = "thread_%d" % thread_id) 
         self.master = master
         self.args = master.args
-        self.env = AtariEnv(gym.make(self.args.game), self.args.frame_seq,self.args.frame_skip,self.master.lock)
-        self.local_model = A3CModel(self.env.state_shape, self.env.action_dim, master.args, logger_)
+        self.env = AtariEnv(gym.make(self.args.game), self.args.frame_seq,self.args.frame_skip)
+        self.local_model = A3CLSTMNet(self.env.state_shape, self.env.action_dim)
         # sync the weights at the beginning
         self.sync_network() 
-        # optimizer is used to zero the old grad
-        self.optim = optim.RMSprop(self.local_model.net.parameters())
-        dtype = torch.cuda.FloatTensor if torch.cuda.is_available() else torch.FloatTensor
-        self.local_model.net.type(dtype)
         self.loss_history = []
         self.win = None
     
     def sync_network(self): 
-        self.local_model.net.load_state_dict(self.master.shared_net.state_dict()) 
+        self.local_model.net.load_state_dict(self.master.shared_model.state_dict()) 
     
     def apply_gadients(self):
-        for share_i,local_i in zip(self.master.shared_net.parameters(),
+        for share_i,local_i in zip(
+                self.master.shared_model.parameters(),
                 self.local_model.net.parameters()):
-            #share_i.grad.data = local_i.grad.data.clone()
-            
-            # another way to update
             share_i._grad = local_i.grad
-            
             #assert np.array_equal(share_i.grad.data.numpy(), local_i.grad.data.numpy())
 
     def weighted_choose_action(self, pi_probs):
@@ -195,38 +163,31 @@ class A3CSingleThread(multiprocessing.Process):
             upto += prob
         return len(pi_probs) - 1
     
-    def forward_explore(self, train_step):
+    def forward_explore(self, hidden):
         terminal = False
-        t_start = train_step
+        t_start = 0
         rollout_path = {"state": [], "action": [], "rewards": [], "done": []}
-        if self.args.use_lstm:
-            hidden = (autograd.Variable(self.lstm_h_init), 
-                    autograd.Variable(self.lstm_c_init))
-        while not terminal and (train_step - t_start <= self.args.t_max):
-            state_tensor = autograd.Variable(
-                    torch.from_numpy(self.env.state).float().cuda())
-            if self.args.use_lstm:
-                pl, v, hidden = self.local_model.net(state_tensor,hidden)
-            else:
-                pl, v = self.local_model.net(state_tensor)
+        pl_roll = []
+        v_roll = []
+        while not terminal and (t_start <= self.args.t_max):
+            t_start += 1
+            state_tensor = Variable(
+                    torch.from_numpy(self.env.state).float())
+            pl, v, hidden = self.local_model.net(state_tensor,hidden)
+            pl_roll.append(pl)
+            v_roll.append(v)
             
-            if random.random() < 0.8:
-                action = self.weighted_choose_action(pl.cpu().data.numpy()[0])
-            else:
-                action = random.randint(0, self.env.action_dim - 1)
-            
+            action = prob.multinomial().data
             _, reward, terminal = self.env.forward_action(action)
-            train_step += 1
+            
             rollout_path["state"].append(self.env.state)
             one_hot_action = np.zeros(self.env.action_dim)
             one_hot_action[action] = 1
             rollout_path["action"].append(one_hot_action.reshape(self.env.action_dim,1))
             rollout_path["rewards"].append(reward)
             rollout_path["done"].append(terminal) 
-        if self.args.use_lstm:
-            return train_step, rollout_path, hidden
-        else:
-            return train_step, rollout_path
+        
+        return rollout_path, hidden, p_roll, v_roll
         
     def discount(self, x):
         return scipy.signal.lfilter([1], [1, -self.args.gamma], x[::-1], axis=0)[::-1]
@@ -234,65 +195,82 @@ class A3CSingleThread(multiprocessing.Process):
     def run(self):
         self.env.reset_env()
         loop = 0
-        self.lstm_h_init = torch.randn(1,1,256).cuda()
-        self.lstm_c_init = torch.randn(1,1,256).cuda()
-        
-        while self.args.train_step <= self.args.t_train:
-            train_step = 0 
+        lstm_h = Variable(torch.zeros(1,1,256))
+        lstm_c = Variable(torch.zeros(1,1,256))
+        for _step in range(self.args.t_train):
             loop += 1
-            with self.master.lock:
-                self.sync_network()
-            self.optim.zero_grad()    
-            
-            if self.args.use_lstm:
-                train_step, rollout_path, hidden= self.forward_explore(train_step)
-                
-                if rollout_path["done"][-1]:
-                    rollout_path["rewards"][-1] = 0
-                    self.env.reset_env()
-                    self.lstm_h_init = torch.randn(1,1,256).cuda()
-                    self.lstm_c_init = torch.randn(1,1,256).cuda()
-                else:
-                    state_tensor = autograd.Variable(torch.from_numpy(
-                        rollout_path["state"][-1]).float().cuda()) 
-                    _, v_t, hidden = self.local_model.net(state_tensor,hidden)
-                    self.lstm_h_init
-                    self.lstm_c_init
-                    rollout_path["rewards"][-1] = v_t.cpu().data.numpy()
-            
-            else: 
-                train_step, rollout_path = self.forward_explore(train_step)
+            rollout_path, (lstm_h,lstm_c), p_roll, v_roll= self.forward_explore((lstm_h,lstm_c))
             
             if rollout_path["done"][-1]:
                 rollout_path["rewards"][-1] = 0
                 self.env.reset_env()
-            
-            elif self.args.use_lstm:
-                state_tensor = autograd.Variable(torch.from_numpy(
-                        rollout_path["state"][-1]).float().cuda()) 
-                _, v_t, _ = self.local_model.net(state_tensor,hidden)
-                rollout_path["rewards"][-1] = v_t.cpu().data.numpy()
+                lstm_h = Variable(torch.zeros(1,1,256))
+                lstm_c = Variable(torch.zeros(1,1,256))
             else:
-                state_tensor = autograd.Variable(torch.from_numpy(
-                        rollout_path["state"][-1]).float().cuda()) 
-                _, v_t = self.local_model.net(state_tensor)
-                rollout_path["rewards"][-1] = v_t.cpu().data.numpy()
+                state_tensor = Variable(torch.from_numpy(
+                    rollout_path["state"][-1]).float()) 
+                _, v_t, _ = self.local_model.net(state_tensor,(lstm_h,lstm_c))
+                lstm_h = Variable(lstm_h.data) 
+                lstm_c = Variable(lstm_c.data) 
+                rollout_path["rewards"][-1] = v_t.data.numpy()
+            
             # calculate rewards 
             rollout_path["returns"] = self.discount(rollout_path["rewards"])
             
-            if self.args.use_lstm: 
-                loss = self.local_model.PathBackProp(rollout_path, lstm_hidden=(self.lstm_h_init,self.lstm_c_init))
-            else:
-                loss = self.local_model.PathBackProp(rollout_path)
+            self.PathBackProp(rollout_path, p_roll, v_roll)
 
-            self.logger_.info("thread %d, step %d, loss %f", self.thread_id, loop, loss)
+            self.logger_.info("process %d, step %d, loss %f", self.process_id, loop, loss)
             self.loss_visual(loss, loop)
-            with self.master.lock:
-                self.apply_gadients()
-                self.master.optim_shared_net()
-                self.master.main_update_step += 1
+
+            self.optimizer.zero_grad()
+
+            (policy_loss + 0.5 * value_loss).backward()
+            torch.nn.utils.clip_grad_norm(self.local_model.parameters(), 40)
+            self.ensure_shared_grads(self.local_model, self.shared_model)
+            self.optimizer.step()
+            
+            self.master.main_update_step += 1
+            self.sync_network()
+
     def loss_visual(self,loss_, loop_):
         self.loss_history.append(loss_) 
         if loop_>2:
             Y_ = np.array(self.loss_history).reshape(-1,1)
             self.win = self.master.vis.line(Y = Y_, X = np.arange(len(self.loss_history)), win=self.win)
+    
+    def ensure_shared_grads(self, model, shared_model):
+        for param, shared_param in zip(model.parameters(), shared_model.parameters()):
+            if shared_param.grad is not None:
+                return 
+            shared_param._grad = param.grad 
+    
+    def PathBackProp(self, rollout_path_, p_roll, v_roll):
+        # backprop of the network both policy and value
+        state = np.array(rollout_path_['state'])
+        target_q = np.array(rollout_path_['returns'])
+        action = np.array(rollout_path_['action'])
+        tensor_target_q = torch.from_numpy(target_q).float()
+       
+
+        for (i, item) in enumerate(p_roll):
+            item
+
+
+
+        batch_size = state.shape[0]
+        
+        batch_state =  Variable(torch.from_numpy(state).float())
+        batch_action = Variable(torch.from_numpy(action).float().view(-1,self.action_dim,1))
+        batch_target_q = Variable(tensor_target_q)
+        
+        pl = pl.view(-1,1,self.action_dim)
+        pl_prob = torch.squeeze(torch.bmm(pl,batch_action))
+        pl_log = torch.log(pl_prob) 
+        diff = tensor_target_q-v.data
+        entropy = -torch.dot(pl_prob, torch.log(pl_prob))
+        pl_loss = -(torch.dot(pl_log, Variable(diff)) + entropy * self.args.entropy_beta )
+        v_loss = self.v_criterion(v, batch_target_q) * batch_size 
+        loss_all = 0.5* v_loss + pl_loss
+        loss_all.backward()
+        self.logger_.info("pl_loss %f, v_loss %f, entropy_loss %f", pl_loss.cpu().data.numpy()[0], v_loss.cpu().data.numpy()[0], entropy.cpu().data.numpy()[0])
+        return  loss_all.cpu().data.numpy()
