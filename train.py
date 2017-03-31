@@ -19,6 +19,7 @@ import visdom
 import torch.multiprocessing as mp
 import my_optim
 from multiprocessing import Value
+import cv2
 class A3CAtari(object):
     
     def __init__(self, args_,logger_):
@@ -41,6 +42,7 @@ class A3CAtari(object):
             for process_id in xrange(self.args.jobs):
                 job = A3CSingleProcess(process_id, self, logger_)
                 self.jobs.append(job)
+        self.test_win = None
     def train(self):
         test_p = mp.Process(target=self.test)
         self.jobs.append(test_p)
@@ -53,23 +55,33 @@ class A3CAtari(object):
     def test_sync(self):
         pass
     
-    def test(self):
-        test_env = AtariEnv(gym.make(self.args.game),self.args.frame_seq,self.args.frame_skip,render = False)
+    def test(self, render_=False):
+        test_env = AtariEnv(gym.make(self.args.game),self.args.frame_seq,self.args.frame_skip,render = render_)
+        test_model = A3CLSTMNet(self.env.state_shape, self.env.action_dim)
         while True:
             terminal = False
             reward_ = 0
             lstm_h = Variable(torch.zeros(1,256), volatile=True)
             lstm_c = Variable(torch.zeros(1,256), volatile=True)
             test_env.reset_env()
-            if int(self.main_update_step.value) % 500 == 0:
+            if (int(self.main_update_step.value)) % 500 == 0:
                 print "step: ", int(self.main_update_step.value)
                 episode_length = 0
+                self.save_model(int(self.main_update_step.value))
+                test_model.load_state_dict(self.shared_model.state_dict())
                 while not terminal:
                     state_tensor = Variable(
                             torch.from_numpy(test_env.state).float())
-                    pl, v, (lstm_h,lstm_c) = self.shared_model(state_tensor,(lstm_h,lstm_c))
+                    img_ = (test_env.state.copy().reshape(42,42)*256) 
+                    img_ = np.stack((img_,)*3)
+                    #img_ = np.uint8(abs(np.fft.rfft2(img_,axes=(0,1))))
+                    #print img_.dtype
+                    self.test_win = self.vis.image(img_, 
+                            win = self.test_win)
+                    pl, v, (lstm_h,lstm_c) = test_model(state_tensor,(lstm_h,lstm_c))
                     #print pl.data.numpy()[0]
                     action = pl.max(1)[1].data.numpy()[0]
+                    #print action
                     #action = np.argmax(pl.cpu().data.numpy()[0])
                     _, reward, terminal = test_env.forward_action(action)
                     reward_ += reward
