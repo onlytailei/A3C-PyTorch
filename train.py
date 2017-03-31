@@ -18,7 +18,7 @@ from A3C import *
 import visdom
 import torch.multiprocessing as mp
 import my_optim
-
+from multiprocessing import Value
 class A3CAtari(object):
     
     def __init__(self, args_,logger_):
@@ -31,7 +31,7 @@ class A3CAtari(object):
         self.optim.share_memory() 
         # visdom
         self.vis = visdom.Visdom()
-        self.main_update_step = 0
+        self.main_update_step = Value('d', 0)
         # load model
         if self.args.load_weight !=0 :
             self.load_model(self.args.load_weight)
@@ -41,8 +41,9 @@ class A3CAtari(object):
             for process_id in xrange(self.args.jobs):
                 job = A3CSingleProcess(process_id, self, logger_)
                 self.jobs.append(job)
-    
     def train(self):
+        test_p = mp.Process(target=self.test)
+        self.jobs.append(test_p)
         self.args.train_step = 0  
         for job in self.jobs:
             job.start()
@@ -53,22 +54,25 @@ class A3CAtari(object):
         pass
     
     def test(self):
-        terminal = False
-        reward_ = 0
-        lstm_h = Variable(torch.zeros(1,256))
-        lstm_c = Variable(torch.zeros(1,256))
-        self.env.reset_env()
-        while not terminal:
-            state_tensor = autograd.Variable(
-                    torch.from_numpy(self.env.state).float())
-            pl, v, (lstm_h,lstm_c) = self.shared_model(state_tensor,(lstm_h,lstm_c))
-            print pl.data.numpy()[0]
-            action = prob.max(1)[1].data.numpy()
-            #action = np.argmax(pl.cpu().data.numpy()[0])
-            _, reward, terminal = self.env.forward_action(action[0])
-            reward_ += reward
-        print reward_
-        return reward_
+        test_env = AtariEnv(gym.make(self.args.game),self.args.frame_seq,self.args.frame_skip,render = False)
+        while True:
+            terminal = False
+            reward_ = 0
+            lstm_h = Variable(torch.randn(1,256))
+            lstm_c = Variable(torch.randn(1,256))
+            test_env.reset_env()
+            if int(self.main_update_step.value) % 500 == 0:
+                while not terminal:
+                    state_tensor = Variable(
+                            torch.from_numpy(test_env.state).float())
+                    pl, v, (lstm_h,lstm_c) = self.shared_model(state_tensor,(lstm_h,lstm_c))
+                    #print pl.data.numpy()[0]
+                    action = pl.max(1)[1].data.numpy()[0]
+                    #action = np.argmax(pl.cpu().data.numpy()[0])
+                    _, reward, terminal = test_env.forward_action(action)
+                    reward_ += reward
+                print "step: ", int(self.main_update_step.value)
+                print "Reward: ", reward_
     
     def save_model(self,name):
         torch.save(self.shared_model.state_dict(), self.args.train_dir + str(name) + '_weight')
@@ -88,7 +92,7 @@ def loggerConfig():
     fileHandler_ = logging.FileHandler("log/a3c_training_log_"+ts)
     fileHandler_.setFormatter(formatter)
     logger.addHandler(fileHandler_)
-    logger.setLevel(logging.DEBUG)
+    logger.setLevel(logging.WARNING)
     return logger
 
 parser = argparse.ArgumentParser()

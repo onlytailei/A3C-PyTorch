@@ -98,25 +98,9 @@ class A3CSingleProcess(mp.Process):
         self.sync_network() 
         self.loss_history = []
         self.win = None
-    
+        #self.Image = None
     def sync_network(self): 
         self.local_model.load_state_dict(self.master.shared_model.state_dict()) 
-    
-    def apply_gadients(self):
-        for share_i,local_i in zip(
-                self.master.shared_model.parameters(),
-                self.local_model.parameters()):
-            share_i._grad = local_i.grad
-            #assert np.array_equal(share_i.grad.data.numpy(), local_i.grad.data.numpy())
-
-    def weighted_choose_action(self, pi_probs):
-        r = random.uniform(0, sum(pi_probs))
-        upto = 0
-        for idx, prob in enumerate(pi_probs):
-            if upto + prob >= r:
-                return idx
-            upto += prob
-        return len(pi_probs) - 1
     
     def forward_explore(self, hidden):
         terminal = False
@@ -129,7 +113,6 @@ class A3CSingleProcess(mp.Process):
             state_ = self.env.state
             state_tensor = Variable(
                     torch.from_numpy(state_).float())
-            
             pl, v, hidden = self.local_model(state_tensor,hidden)
             pl_roll.append(pl)
             v_roll.append(v)
@@ -155,7 +138,6 @@ class A3CSingleProcess(mp.Process):
         while True:
             loop += 1
             rollout_path, (lstm_h,lstm_c), p_roll, v_roll= self.forward_explore((lstm_h,lstm_c))
-            
             if rollout_path["done"][-1]:
                 rollout_path["rewards"][-1] = 0
                 self.env.reset_env()
@@ -174,7 +156,7 @@ class A3CSingleProcess(mp.Process):
             
             loss = self.PathBackProp(rollout_path, p_roll, v_roll)
             self.loss_visual(loss, loop)
-            self.master.main_update_step += 1
+            self.master.main_update_step.value += 1
             self.sync_network()
 
     def loss_visual(self,loss_, loop_):
@@ -182,6 +164,7 @@ class A3CSingleProcess(mp.Process):
         if loop_>2:
             Y_ = np.array(self.loss_history).reshape(-1,1)
             self.win = self.master.vis.line(Y = Y_, X = np.arange(len(self.loss_history)), win=self.win)
+            #self.Image = self.master.vis.image(self.state_.resize(160,160), win=self.Image)
     
     def ensure_shared_grads(self, model, shared_model):
         for param, shared_param in zip(model.parameters(), shared_model.parameters()):
