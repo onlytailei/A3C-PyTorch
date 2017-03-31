@@ -98,7 +98,8 @@ class A3CSingleProcess(mp.Process):
         self.sync_network() 
         self.loss_history = []
         self.win = None
-        #self.Image = None
+        self.state_final = None
+        self.Image = None
     def sync_network(self): 
         self.local_model.load_state_dict(self.master.shared_model.state_dict()) 
     
@@ -118,7 +119,7 @@ class A3CSingleProcess(mp.Process):
             v_roll.append(v)
             
             action = pl.multinomial().data.numpy()[0]
-            _, reward, terminal = self.env.forward_action(action)
+            self.state_final, reward, terminal = self.env.forward_action(action)
             
             rollout_path["state"].append(state_)
             rollout_path["action"].append(action)
@@ -128,7 +129,7 @@ class A3CSingleProcess(mp.Process):
         return rollout_path, hidden, pl_roll, v_roll
         
     def discount(self, x):
-        return scipy.signal.lfilter([1], [1, -self.args.gamma], x[::-1], axis=0)[::-1]
+        return scipy.signal.lfilter([1], [1, -self.args.gamma], x[::-1], axis=0)[::-1][:-1]
 
     def run(self):
         self.env.reset_env()
@@ -137,19 +138,20 @@ class A3CSingleProcess(mp.Process):
         lstm_c = Variable(torch.zeros(1,256))
         while True:
             loop += 1
+            
             rollout_path, (lstm_h,lstm_c), p_roll, v_roll= self.forward_explore((lstm_h,lstm_c))
             if rollout_path["done"][-1]:
-                rollout_path["rewards"][-1] = 0
+                rollout_path["rewards"].append(0) 
                 self.env.reset_env()
                 lstm_h = Variable(torch.zeros(1,256))
                 lstm_c = Variable(torch.zeros(1,256))
             else:
                 state_tensor = Variable(torch.from_numpy(
-                    self.env.state).float()) 
+                    self.state_final).float()) 
                 _, v_t, _ = self.local_model(state_tensor,(lstm_h,lstm_c))
                 lstm_h = Variable(lstm_h.data) 
                 lstm_c = Variable(lstm_c.data) 
-                rollout_path["rewards"][-1] = v_t.data.numpy()
+                rollout_path["rewards"].append(v_t.data.numpy())
             
             # calculate rewards 
             rollout_path["returns"] = self.discount(rollout_path["rewards"])
@@ -164,7 +166,7 @@ class A3CSingleProcess(mp.Process):
         if loop_>2:
             Y_ = np.array(self.loss_history).reshape(-1,1)
             self.win = self.master.vis.line(Y = Y_, X = np.arange(len(self.loss_history)), win=self.win)
-            #self.Image = self.master.vis.image(self.state_.resize(160,160), win=self.Image)
+            #self.Image = self.master.vis.image(np.resize(self.state_final,(160,160)), win=self.Image)
     
     def ensure_shared_grads(self, model, shared_model):
         for param, shared_param in zip(model.parameters(), shared_model.parameters()):
@@ -177,19 +179,23 @@ class A3CSingleProcess(mp.Process):
         state = np.array(rollout_path_['state'])
         target_q = np.array(rollout_path_['returns'])
         action = np.array(rollout_path_['action'])
+        rewards = np.array(rollout_path_['rewards'])
         #tensor_target_q = torch.from_numpy(target_q).float()
         policy_loss = 0
         value_loss = 0
         gae = torch.zeros(1,1)
-        for (i, item) in enumerate(p_roll):
-            log_prob = torch.log(item)
-            entropy = - torch.dot(log_prob, item)
+        for i in reversed(range(len(p_roll))):
+            log_prob = torch.log(p_roll[i])
+            entropy = - torch.dot(log_prob, p_roll[i])
             log_prob_ = log_prob.gather(1, Variable(torch.from_numpy(action[i].reshape(1,1))))
             advantage = Variable(torch.from_numpy(np.array(target_q[i]).reshape(1,1)).float())-v_roll[i] 
-            
             value_loss = value_loss + 0.5 * advantage.pow(2)
-            gae = gae * self.args.gamma + advantage.data
+            if i != (len(p_roll)-1):
+                delta_t = rewards[i] + self.args.gamma * v_roll[i+1].data - v_roll[i].data 
+            else:
+                delta_t = rewards[i] + self.args.gamma * rewards[i+1] - v_roll[i].data 
             
+            gae = gae * self.args.gamma + delta_t
             policy_loss = policy_loss - log_prob_ * Variable(gae) - 0.01 * entropy 
 
         self.master.optim.zero_grad()

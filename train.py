@@ -58,10 +58,12 @@ class A3CAtari(object):
         while True:
             terminal = False
             reward_ = 0
-            lstm_h = Variable(torch.randn(1,256))
-            lstm_c = Variable(torch.randn(1,256))
+            lstm_h = Variable(torch.zeros(1,256), volatile=True)
+            lstm_c = Variable(torch.zeros(1,256), volatile=True)
             test_env.reset_env()
             if int(self.main_update_step.value) % 500 == 0:
+                print "step: ", int(self.main_update_step.value)
+                episode_length = 0
                 while not terminal:
                     state_tensor = Variable(
                             torch.from_numpy(test_env.state).float())
@@ -71,8 +73,9 @@ class A3CAtari(object):
                     #action = np.argmax(pl.cpu().data.numpy()[0])
                     _, reward, terminal = test_env.forward_action(action)
                     reward_ += reward
-                print "step: ", int(self.main_update_step.value)
+                    episode_length += 1
                 print "Reward: ", reward_
+                print "episode_length", episode_length
     
     def save_model(self,name):
         torch.save(self.shared_model.state_dict(), self.args.train_dir + str(name) + '_weight')
@@ -121,13 +124,13 @@ parser.add_argument("--t_flag", type = int,
         default = 1, 
         help = "training flag")
 parser.add_argument("--jobs", type = int, 
-        default = 8, 
+        default = 16, 
         help = "parallel running thread number")
 parser.add_argument("--frame_skip", type = int,
         default = 1, 
         help = "number of frame skip")
 parser.add_argument("--frame_seq", type = int,
-        default = 4, 
+        default = 1, 
         help = "number of frame sequence")
 parser.add_argument("--opt", type = str,
         default = "rms", 
@@ -145,12 +148,8 @@ parser.add_argument("--entropy_beta", type = float,
         default = 1e-5, 
         help = "param of policy entropy weight")
 parser.add_argument("--gamma", type = float, 
-        default = 0.95, 
+        default = 0.99, 
         help = "discounted ratio")
-parser.add_argument("--train_step", type = int, 
-        default = 0, 
-        help = "train step. unchanged")
-
 parser.add_argument("--load_weight", type = int, 
         default = 0, 
         help = "train step. unchanged")
