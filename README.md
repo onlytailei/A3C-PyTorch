@@ -28,12 +28,12 @@ A3C is the state-of-art Deep Reinforcement Learning method.
 ./train_lstm.sh
 ```
 
-### Test wigh trained weight after 169000 updates.
+### Test wigh trained weight after 169000 updates for _PongDeterminisitc-v3_.
 
 ```
 ./test_lstm.sh 169000
 ```
-A test result [video](https://youtu.be/Ohpo6BcMgZw) for _PongDeterminisitc-v3_  is available.
+A test result [video](https://youtu.be/Ohpo6BcMgZw) is available.
 
 ### Check the loss curves of all threads in http://localhost:8097
 ![loss_png](./assets/loss.png)
