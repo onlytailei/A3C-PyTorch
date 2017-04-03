@@ -10,10 +10,9 @@
 
 ```
 
-This repository contains an implementation of Adavantage async Actor-Critic (A3C) in PyTorch based on the original paper by the authors and the pytorch implementation (https://github.com/ikostrikov/pytorch-a3c) by [Ilya Kostrikov](https://github.com/ikostrikov).
+This repository contains an implementation of Adavantage async Actor-Critic (A3C) in PyTorch based on the original paper by the authors and the [PyTorch implementation](https://github.com/ikostrikov/pytorch-a3c) by [Ilya Kostrikov](https://github.com/ikostrikov).
 
 A3C is the state-of-art Deep Reinforcement Learning method.
-
 
 ## Dependencies
 * Python 2.7
@@ -34,13 +33,10 @@ A3C is the state-of-art Deep Reinforcement Learning method.
 ```
 ./test_lstm.sh 169000
 ```
-### A test result [video] for _PongDeterminisitc-v3_ (https://youtu.be/Ohpo6BcMgZw) is available.
+A test result [video](https://youtu.be/Ohpo6BcMgZw) for _PongDeterminisitc-v3_  is available.
 
 ### Check the loss curves of all threads in http://localhost:8097
 ![loss_png](./assets/loss.png)
-
-
->Continuous versions are still on going.
 
 ## References
 
