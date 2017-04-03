@@ -72,20 +72,17 @@ class A3CAtari(object):
                 while not terminal:
                     state_tensor = Variable(
                             torch.from_numpy(test_env.state).float())
-                    img_ = (test_env.state.copy().reshape(42,42)*256) 
-                    img_ = np.stack((img_,)*3)
-                    #img_ = np.uint8(abs(np.fft.rfft2(img_,axes=(0,1))))
-                    #print img_.dtype
-                    self.test_win = self.vis.image(img_, 
-                            win = self.test_win)
                     pl, v, (lstm_h,lstm_c) = test_model(state_tensor,(lstm_h,lstm_c))
                     #print pl.data.numpy()[0]
                     action = pl.max(1)[1].data.numpy()[0]
-                    #print action
-                    #action = np.argmax(pl.cpu().data.numpy()[0])
                     _, reward, terminal = test_env.forward_action(action)
                     reward_ += reward
                     episode_length += 1
+                    #img_ = (test_env.state.copy().reshape(42,42)*256)
+                    #img_ = cv2.resize(img_, (160,160))
+                    #img_ = np.stack((img_,)*3)
+                    #self.test_win = self.vis.image(img_, 
+                            #win = self.test_win)
                 print "Reward: ", reward_
                 print "episode_length", episode_length
     
@@ -176,5 +173,5 @@ if __name__=="__main__":
         model.train()
     else:
         print "=====testing====="
-        model.test()
+        model.test(True)
 
